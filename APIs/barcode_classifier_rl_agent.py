@@ -4,5 +4,11 @@ from dataclasses import dataclass
 
 
 @dataclass
-class BarcodeClassifierRL_Agent:
+class SingleBarcodeClassifierConfidence:
     confidence_score: float
+    id: int
+
+
+@dataclass
+class AllBarcodeClassifierConfidences:
+    id_to_confidence_map: dict[int, SingleBarcodeClassifierConfidence]
