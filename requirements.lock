@@ -10,5 +10,9 @@
 #   universal: false
 
 -e file:.
+numpy==2.2.5
+    # via trimesh
 panda3d==1.10.15
+    # via engine
+trimesh==4.6.8
     # via engine
