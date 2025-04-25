@@ -11,8 +11,9 @@ class SingleNodeState:
     depth_map: Image
     postion_of_other_nodes: list[tuple[float, float, float]]
     rotation_of_other_nodes: list[tuple[float, float, float]]
+    id: int
 
 
 @dataclass
 class FullGraphState:
-    nodes: list[SingleNodeState]
+    id_to_node_map: dict[int, SingleNodeState]
