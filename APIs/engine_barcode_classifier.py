@@ -5,6 +5,12 @@ from torchvision.tv_tensors import Image
 
 
 @dataclass
-class BarcodeClassifier:
+class SingleBarcodeClassifier:
     image_dim: tuple[int, int]
     image: Image
+    id: int
+
+
+@dataclass
+class AllBarcodeClassifiers:
+    id_to_barcode_map: dict[int, SingleBarcodeClassifier]
