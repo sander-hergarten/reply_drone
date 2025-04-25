@@ -10,9 +10,10 @@
 #   universal: false
 
 -e file:.
-numpy==2.2.5
-    # via trimesh
 panda3d==1.10.15
     # via engine
-trimesh==4.6.8
+    # via panda3d-simplepbr
+panda3d-simplepbr==0.13.1
     # via engine
+typing-extensions==4.13.2
+    # via panda3d-simplepbr
