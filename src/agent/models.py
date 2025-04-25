@@ -6,33 +6,25 @@ from torchvision.tv_tensors import Image  # Assuming this is torch.Tensor compat
 from scipy.spatial.transform import Rotation as R
 from dataclasses import dataclass
 
-
-# Placeholder for layer_init function (assuming it exists as before)
-def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-    torch.nn.init.orthogonal_(layer.weight, std)
-    torch.nn.init.constant_(layer.bias, bias_const)
-    return layer
-
-
-# Define expected dimensions (replace with your actual values)
-DEPTH_MAP_CHANNELS = 1
-DEPTH_MAP_HEIGHT = 64
-DEPTH_MAP_WIDTH = 64
-MAX_OTHER_NODES = 10
-QUATERNION_DIM = 4
-POSITION_DIM = 3
-VECTOR_INPUT_DIM = QUATERNION_DIM + POSITION_DIM  # Now 7
-OTHER_NODE_FEATURE_DIM = QUATERNION_DIM + POSITION_DIM  # Now 7
-EMBEDDING_DIM = 128  # Example dimension for processed features
+from .model_attributes import (
+    EMBEDDING_DIM,
+    HEADCOUNT,
+    MAX_OTHER_NODES,
+    OTHER_NODE_FEATURE_DIM,
+)
+from .utils import layer_init
+from .processors import vector_processor, cnn_processor, other_nodes_processor
 
 
 @dataclass
 class SingleNodeState:
-    position: tuple[float, float, float]
+    postion: tuple[float, float, float]
     rotation: tuple[float, float, float]
-    depth_map: Image  # Should behave like a Tensor [C, H, W]
-    position_of_other_nodes: list[tuple[float, float, float]]
+    depth_map: Image
+    overlap_map: dict[int, float]
+    postion_of_other_nodes: list[tuple[float, float, float]]
     rotation_of_other_nodes: list[tuple[float, float, float]]
+    id: int
 
 
 class Agent(nn.Module):
@@ -42,43 +34,15 @@ class Agent(nn.Module):
         action_dim = np.prod(action_space_shape)
 
         # --- 1. Input Processing Modules ---
-
         # Module for own position and rotation (simple vectors)
-        self.vector_processor = nn.Sequential(
-            layer_init(nn.Linear(VECTOR_INPUT_DIM, 64)),  # Updated input size
-            nn.ReLU(),
-            layer_init(nn.Linear(64, EMBEDDING_DIM // 3)),
-        )
-
         # Module for depth map (CNN) - Define your own CNN architecture
-        self.cnn_processor = nn.Sequential(
-            layer_init(nn.Conv2d(DEPTH_MAP_CHANNELS, 32, kernel_size=8, stride=4)),
-            nn.ReLU(),
-            layer_init(nn.Conv2d(32, 64, kernel_size=4, stride=2)),
-            nn.ReLU(),
-            layer_init(nn.Conv2d(64, 64, kernel_size=3, stride=1)),
-            nn.ReLU(),
-            nn.Flatten(),
-            # Calculate the flattened size based on CNN output and H, W
-            # Example calculation for 64x64 input:
-            # Conv1: (64 - 8) / 4 + 1 = 15
-            # Conv2: (15 - 4) / 2 + 1 = 6.5 -> 6 (floor)
-            # Conv3: (6 - 3) / 1 + 1 = 4
-            # Flattened size: 64 * 4 * 4 = 1024
-            layer_init(
-                nn.Linear(64 * 4 * 4, EMBEDDING_DIM // 3)
-            ),  # Output partial embedding
-        )
-
         # Module for variable-length lists of other nodes
+        self.vector_processor = vector_processor
+        self.cnn_processor = cnn_processor
+        self.other_nodes_processor = other_nodes_processor
+
         # Option A: Padding + Transformer Encoder (Powerful, handles relations)
-        self.other_nodes_processor = nn.Sequential(
-            # Project each node's features (pos+rot) to embedding dim
-            layer_init(nn.Linear(OTHER_NODE_FEATURE_DIM, EMBEDDING_DIM)),
-            nn.ReLU(),
-            # Note: Transformer layer expects input shape (SeqLen, Batch, EmbedDim)
-            # We will need to permute dimensions before passing to the encoder layer
-        )
+
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=EMBEDDING_DIM,
             nhead=4,
@@ -90,22 +54,13 @@ class Agent(nn.Module):
         # Output will be (Batch, EmbedDim)
         self.transformer_output_processor = nn.Sequential(
             layer_init(
-                nn.Linear(EMBEDDING_DIM, EMBEDDING_DIM // 3)
+                nn.Linear(EMBEDDING_DIM, EMBEDDING_DIM // HEADCOUNT)
             )  # Output partial embedding
         )
 
-        # Option B: Simpler Aggregation (Mean/Max Pooling) - Uncomment if preferred
-        # self.other_nodes_processor = nn.Sequential(
-        #     layer_init(nn.Linear(OTHER_NODE_FEATURE_DIM, 64)),
-        #     nn.ReLU(),
-        #     layer_init(nn.Linear(64, EMBEDDING_DIM // 3))
-        # )
-        # # Aggregation (e.g., mean) will happen in the forward pass
-
         # --- 2. Feature Combination ---
-        combined_embedding_dim = (
-            EMBEDDING_DIM // 3
-        ) * 3  # Sum of partial embedding dims
+        combined_embedding_dim = (EMBEDDING_DIM // HEADCOUNT) * 3
+
         self.combiner = nn.Sequential(
             layer_init(nn.Linear(combined_embedding_dim, 256)), nn.ReLU()
         )
@@ -122,7 +77,8 @@ class Agent(nn.Module):
         Input: List of position lists, List of rotation lists (one list per batch item)
         Output: Tensor of processed features (Batch, EmbedDim // 3)
         """
-            batch_size = len(positions_list)
+
+        batch_size = len(positions_list)
         padded_features = torch.zeros(
             batch_size, MAX_OTHER_NODES, OTHER_NODE_FEATURE_DIM, device=device
         )  # Updated feature dim
@@ -187,29 +143,45 @@ class Agent(nn.Module):
         # Assume state_batch provides Euler rotations initially
         # Convert Euler to Quat before passing to internal processing
         # This requires knowing the Euler sequence (e.g., 'xyz', 'zyx')
-        euler_seq = 'xyz' # IMPORTANT: Match environment's convention
+        euler_seq = "xyz"  # IMPORTANT: Match environment's convention
 
         # Example: Based on previous structure (list of SingleNodeState)
-        if isinstance(state_batch, list) and all(isinstance(s, SingleNodeState) for s in state_batch):
+        if isinstance(state_batch, list) and all(
+            isinstance(s, SingleNodeState) for s in state_batch
+        ):
             # Own rotation conversion
             own_rot_euler_list = [s.rotation for s in state_batch]
-            own_rot_quat_scipy = R.from_euler(euler_seq, own_rot_euler_list, degrees=False).as_quat() # Scipy quat: (x,y,z,w)
+            own_rot_quat_scipy = R.from_euler(
+                euler_seq, own_rot_euler_list, degrees=False
+            ).as_quat()  # Scipy quat: (x,y,z,w)
             # Convert Scipy (x,y,z,w) to PyTorch Tensor (w,x,y,z) or (x,y,z,w) - be consistent! Let's use (w,x,y,z)
-            own_rot_quat = torch.tensor(np.roll(own_rot_quat_scipy, 1, axis=1), dtype=torch.float32, device=device) # Now (w,x,y,z)
+            own_rot_quat = torch.tensor(
+                np.roll(own_rot_quat_scipy, 1, axis=1),
+                dtype=torch.float32,
+                device=device,
+            )  # Now (w,x,y,z)
 
             # Other nodes rotation conversion
             other_pos_list = [s.position_of_other_nodes for s in state_batch]
             other_rot_quat_list = []
             for rot_list_euler in [s.rotation_of_other_nodes for s in state_batch]:
-                 if rot_list_euler:
-                      quats_scipy = R.from_euler(euler_seq, rot_list_euler, degrees=False).as_quat()
-                      quats_torch = torch.tensor(np.roll(quats_scipy, 1, axis=1), dtype=torch.float32) # List of Tensors (w,x,y,z)
-                      other_rot_quat_list.append(list(quats_torch)) # Store list of tensors
-                 else:
-                      other_rot_quat_list.append([])
+                if rot_list_euler:
+                    quats_scipy = R.from_euler(
+                        euler_seq, rot_list_euler, degrees=False
+                    ).as_quat()
+                    quats_torch = torch.tensor(
+                        np.roll(quats_scipy, 1, axis=1), dtype=torch.float32
+                    )  # List of Tensors (w,x,y,z)
+                    other_rot_quat_list.append(
+                        list(quats_torch)
+                    )  # Store list of tensors
+                else:
+                    other_rot_quat_list.append([])
 
             # Extract other components
-            pos_batch = torch.tensor([s.position for s in state_batch], dtype=torch.float32, device=device)
+            pos_batch = torch.tensor(
+                [s.position for s in state_batch], dtype=torch.float32, device=device
+            )
             depth_batch = torch.stack([s.depth_map for s in state_batch]).to(device)
 
         elif isinstance(state_batch, dict):
@@ -224,16 +196,21 @@ class Agent(nn.Module):
             raise TypeError(f"Unsupported state_batch type: {type(state_batch)}")
         # --- End Batch Handling ---
 
-
         # 1. Process inputs (Now using quaternions internally)
-        vector_input = torch.cat([pos_batch, own_rot_quat], dim=-1) # Use converted quat
+        vector_input = torch.cat(
+            [pos_batch, own_rot_quat], dim=-1
+        )  # Use converted quat
         vector_features = self.vector_processor(vector_input)
         cnn_features = self.cnn_processor(depth_batch)
         # Pass list of quaternion lists to helper
-        other_nodes_features = self._process_other_nodes(other_pos_list, other_rot_quat_list, device)
+        other_nodes_features = self._process_other_nodes(
+            other_pos_list, other_rot_quat_list, device
+        )
 
         # 2. Combine features
-        combined_features = torch.cat([vector_features, cnn_features, other_nodes_features], dim=-1)
+        combined_features = torch.cat(
+            [vector_features, cnn_features, other_nodes_features], dim=-1
+        )
         combined_embedding = self.combiner(combined_features)
 
         # 3. Get action distribution mean and value estimate
@@ -243,8 +220,10 @@ class Agent(nn.Module):
         # --- Action processing ---
         # Assume action_mean_raw contains quaternion components (e.g., last 4 dims)
         # Example: action = [dx, dy, dz, qw, qx, qy, qz]
-        action_mean_pos = action_mean_raw[..., :-QUATERNION_DIM] # Position/other parts
-        action_mean_quat_raw = action_mean_raw[..., -QUATERNION_DIM:] # Raw quaternion part
+        action_mean_pos = action_mean_raw[..., :-QUATERNION_DIM]  # Position/other parts
+        action_mean_quat_raw = action_mean_raw[
+            ..., -QUATERNION_DIM:
+        ]  # Raw quaternion part
 
         # Normalize the quaternion part of the mean for the distribution
         action_mean_quat = F.normalize(action_mean_quat_raw, p=2, dim=-1)
@@ -268,9 +247,11 @@ class Agent(nn.Module):
         # but evaluate at the normalized (or provided) action.
         # Recalculate distribution with raw mean for log_prob
         probs_for_logprob = torch.distributions.Normal(action_mean_raw, action_std)
-        log_prob = probs_for_logprob.log_prob(action).sum(1) # Sum over action dimensions
+        log_prob = probs_for_logprob.log_prob(action).sum(
+            1
+        )  # Sum over action dimensions
         # Entropy depends only on std deviation for Normal dist, so it's okay
-        entropy = probs.entropy().sum(1) # Sum over action dimensions
+        entropy = probs.entropy().sum(1)  # Sum over action dimensions
 
         return action, log_prob, entropy, value.flatten()
 
