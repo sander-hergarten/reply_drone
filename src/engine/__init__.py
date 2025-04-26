@@ -8,6 +8,7 @@ use:
 
 """
 
+from panda3d.core import Filename
 
 import math
 import os
@@ -26,6 +27,29 @@ p3d.load_prc_file_data(
     'texture-anisotropic-degree 16\n'
 )
 
+def take_screenshot(filepath, cam_pos=None, cam_hpr=None):
+    """Capture screenshot with specific camera position/rotation"""
+    if cam_pos is not None or cam_hpr is not None:
+        # Store original camera transform
+        original_pos = base.cam.get_pos()
+        original_hpr = base.cam.get_hpr()
+
+        # Apply new transform
+        if cam_pos: base.cam.set_pos(cam_pos)
+        if cam_hpr: base.cam.set_hpr(cam_hpr)
+
+        # Force render updates
+        base.graphicsEngine.renderFrame()
+        base.graphicsEngine.renderFrame()
+
+    # Capture screenshot
+    base.win.saveScreenshot(Filename(filepath))
+
+    # Restore original transform
+    if cam_pos is not None or cam_hpr is not None:
+        base.cam.set_pos(original_pos)
+        base.cam.set_hpr(original_hpr)
+        base.graphicsEngine.renderFrame()
 
 class App(ShowBase):
     def __init__(self):
@@ -55,6 +79,8 @@ class App(ShowBase):
         self.accept('a', self.toggle_ambient_light)
         self.accept('shift-l', self.model_root.ls)
         self.accept('shift-a', self.model_root.analyze)
+        self.accept("f1", take_screenshot, ["current_camera.png"])
+        self.accept("f2", take_screenshot, ["custom_camera.png", (20, -20, 3), (45, 0, 0)])
 
         self.model_root.reparent_to(self.render)
 
@@ -96,7 +122,18 @@ class App(ShowBase):
             p3d.autoBind(self.model_root.node(), self.anims, ~0)
             if self.anims.get_num_anims() > 0:
                 self.anims.get_anim(0).loop(True)
-
+        """
+    def take_screenshot(self):
+        
+        Saves a screenshot of the current view to a timestamped PNG file.
+        Uses Panda3D's built-in screenshot function.
+        
+        timestamp = p3d.Timestamp.now().get_rfc1123() # Get a timestamp for filename
+        # defaultFilename=True generates names like screenshot_YYYY-MM-DD_HH-MM-SS.png
+        # filename= can be used for a specific name, e.g., f"mesh_view_{timestamp}.png"
+        self.screenshot(defaultFilename=True)
+        print(f"Screenshot saved.") # Confirmation message
+        """
     def toggle_normal_maps(self):
         self.pipeline.use_normal_maps = not self.pipeline.use_normal_maps
 
