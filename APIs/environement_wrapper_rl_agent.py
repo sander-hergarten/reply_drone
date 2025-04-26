@@ -31,10 +31,11 @@ class SingleAction:
 
 AllActions = dict[int, SingleAction]
 
+seed = int
 
 #########################
 # TO IMPLEMENT:
-reset = Callable[[], tuple[FullGraphStateNoOverlap, AllRewardScores]]
+reset = Callable[[seed], tuple[FullGraphStateNoOverlap, AllRewardScores]]
 step = Callable[
     [AllActions],
     tuple[FullGraphStateNoOverlap, AllRewardScores],
