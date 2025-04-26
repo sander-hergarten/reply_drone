@@ -8,10 +8,10 @@ class Engine:
 
 @dataclass
 class SingleNodeState:
-    postion: tuple[float, float, float]
+    position: tuple[float, float, float]
     rotation: tuple[float, float, float]
     depth_map: Image
     overlap_map: dict[int, float]
-    postion_of_other_nodes: dict[int, tuple[float, float, float]]
+    position_of_other_nodes: dict[int, tuple[float, float, float]]
     rotation_of_other_nodes: dict[int, tuple[float, float, float]]
     id: int
