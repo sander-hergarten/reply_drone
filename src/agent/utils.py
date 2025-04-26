@@ -1,3 +1,4 @@
+from scipy.spatial.transform import rotation as R
 import torch
 import numpy as np
 from .model_attributes import MAX_OTHER_NODES, OTHER_NODE_FEATURE_DIM
@@ -10,48 +11,82 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 
-def _process_other_nodes(positions_list, rotations_quat_list, device):
+def padding_other_nodes(positions_dict_list, rotations_quat_dict_list, device):
     """
     Helper to process variable-length lists.
     Handles padding and processing (e.g., via Transformer).
     Input: List of position lists, List of rotation lists (one list per batch item)
-    Output: Tensor of processed features (Batch, EmbedDim // 3)
+    Output: Tensor of processed features (Batch, EmbedDim // HEADCOUNT)
     """
-
-    batch_size = len(positions_list)
+    batch_size = len(positions_dict_list)
+    # Features will be Quat (4) + Pos (3) = 7
     padded_features = torch.zeros(
         batch_size, MAX_OTHER_NODES, OTHER_NODE_FEATURE_DIM, device=device
-    )  # Updated feature dim
-    masks = torch.zeros(batch_size, MAX_OTHER_NODES, dtype=torch.bool, device=device)
+    )
+    masks = torch.zeros(
+        batch_size, MAX_OTHER_NODES, dtype=torch.bool, device=device
+    )  # False=valid
 
     for i in range(batch_size):
-        num_nodes = min(len(positions_list[i]), MAX_OTHER_NODES)
-        if num_nodes > 0:
+        # Extract values (ignore keys/IDs for now)
+        # Ensure corresponding pos and rot values are aligned if dict keys differ (shouldn't happen if structure is consistent)
+        pos_values = list(positions_dict_list[i].values())
+        quat_values = list(
+            rotations_quat_dict_list[i].values()
+        )  # Already converted to quat tensors
+
+        num_nodes = min(len(pos_values), MAX_OTHER_NODES)
+
+        if num_nodes > 0 and len(pos_values) == len(quat_values):  # Basic check
             pos = torch.tensor(
-                positions_list[i][:num_nodes], dtype=torch.float32, device=device
+                pos_values[:num_nodes], dtype=torch.float32, device=device
             )
-            # Use quaternions directly
-            quat = torch.stack(rotations_quat_list[i][:num_nodes]).to(
-                device
-            )  # Assuming rotations_quat_list contains tensors
-            # quat = torch.tensor(rotations_quat_list[i][:num_nodes], dtype=torch.float32, device=device) # If list of lists/tuples
+            # Stack the list of quaternion tensors
+            quat = torch.stack(quat_values[:num_nodes]).to(device)
 
             features = torch.cat([pos, quat], dim=-1)  # Shape: (num_nodes, 7)
             padded_features[i, :num_nodes, :] = features
-            masks[i, :num_nodes] = False
+            masks[i, :num_nodes] = False  # Valid tokens
+            # Set remaining masks for padding
             if num_nodes < MAX_OTHER_NODES:
-                masks[i, num_nodes:] = True
+                masks[i, num_nodes:] = True  # Padding tokens
 
-    # ... (Rest of transformer processing is the same) ...
-    x = self.other_nodes_processor(padded_features)
-    transformer_output = self.transformer_encoder(x, src_key_padding_mask=masks)
-    transformer_output = transformer_output.masked_fill(masks.unsqueeze(-1), 0.0)
-    non_pad_count = (~masks).sum(dim=1, keepdim=True)
-    summed_features = transformer_output.sum(dim=1)
-    mean_features = torch.where(
-        non_pad_count > 0,
-        summed_features / non_pad_count,
-        torch.zeros_like(summed_features),
-    )
-    processed_other_nodes = self.transformer_output_processor(mean_features)
-    return processed_other_nodes
+    return padded_features, masks
+
+
+def filter_by_n_closest(
+    origin: tuple[float, float, float],
+    positions: dict[int, tuple[float, float, float]],
+    rotations: dict[int, tuple[float, float, float]],
+    overlap_map: dict[int, float],
+    n: int,
+):
+    smallest_position_ids = list(
+        map(
+            lambda x: x[0],
+            sorted(
+                [
+                    (i, np.linalg.norm(np.array(origin) - np.array(position)))
+                    for i, position in positions.items()
+                ],
+                key=lambda x: x[1],
+            ),
+        )
+    )[:MAX_OTHER_NODES]
+
+    smallest_positions = {i: positions[i] for i in smallest_position_ids}
+    smallest_rotations = {i: rotations[i] for i in smallest_position_ids}
+    smallest_overlap = {i: overlap_map[i] for i in smallest_position_ids}
+
+    return smallest_positions, smallest_rotations, smallest_overlap
+
+
+def curry_euler_to_quaternion_device(device):
+    def euler_to_quaternion(rotation: tuple[float, float, float], euler_sequence="xyz"):
+        quaternion_scipy = R.from_euler(
+            euler_sequence, rotation, degrees=True
+        ).as_quat()
+
+        return quaternion_scipy
+
+    return euler_to_quaternion()
