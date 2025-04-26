@@ -38,8 +38,8 @@ class Engine:
 @dataclass
 class SingleAction:
     id: int
-    new_pos: tuple[float, float, float]
-    new_rot: tuple[float, float, float]
+    delta_pos: tuple[float, float, float]
+    delta_rot: tuple[float, float, float]
     done: bool
 
 
@@ -48,7 +48,7 @@ AllActions = dict[int, SingleAction]
 
 #########################
 # TO IMPLEMENT:
-reset = Callable[[], tuple[FullGraphState, AllBarcodeClassifiers]]
+reset = Callable[[int], tuple[FullGraphState, AllBarcodeClassifiers]]
 step = Callable[
     [AllActions],
     tuple[FullGraphState, AllBarcodeClassifiers],
