@@ -2,275 +2,201 @@
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
-from typing import (
-    Dict,
-    Optional,
-    Tuple,
-    List,
-)  # Added List for potential type hints elsewhere
+from typing import Dict, Optional, Tuple, List
 
-# Import model attributes and helper functions
+# Import model attributes
 from .model_attributes import (
-    EMBEDDING_DIM,
-    HEADCOUNT,
-    MAX_OTHER_NODES,
-    QUATERNION_DIM,
-    OTHER_NODE_FEATURE_DIM,
-    VECTOR_INPUT_DIM,  # Needed for internal consistency checks if desired
+    PARTIAL_EMBEDDING_DIM,  # Output dim of each processor
+    DEPTH_MAP_HEIGHT,  # Needed by CNNProcessor
+    DEPTH_MAP_WIDTH,  # Needed by CNNProcessor
+    TRANSFORMER_D_MODEL,  # Needed by OtherNodesProcessor
 )
-from .utils import layer_init  # Removed utils not directly used by Agent class anymore
 
-# Import network components
-from .processors import vector_processor, cnn_processor, other_nodes_processor
+# Import utility functions
+from .utils import layer_init
 
-# Import type definition for clarity, although not used in function signatures anymore
-from .types import SingleNodeState
+# Import processor modules
+from .processors import VectorProcessor, CNNProcessor, OtherNodesProcessor
 
 
 class Agent(nn.Module):
-    def __init__(self, action_space_shape, rpo_alpha):
+    """
+    The main Agent network using a modular structure for input processing heads.
+    Combines features from different processors and outputs policy and value estimates.
+    """
+
+    def __init__(self, action_space_shape: Tuple[int], rpo_alpha: float):
         """
-        Initializes the Agent network.
+        Initializes the Agent network with modular processors.
 
         Args:
-            action_space_shape (tuple or list): Shape of the action space (determines output size).
-                                                Expected to be the agent's action dimension (e.g., including quaternion).
+            action_space_shape (Tuple[int]): Shape of the action space.
+                                            Expected to be (POSITION_DIM + ROTATION_DIM,).
             rpo_alpha (float): Alpha parameter for RPO noise injection.
         """
         super().__init__()
         self.rpo_alpha = rpo_alpha
-        # Calculate action dimension from the provided shape
-        # Example: if shape is (7,), action_dim is 7
-        action_dim = np.prod(action_space_shape).item()  # Use .item() for scalar
+        action_dim = np.prod(action_space_shape).item()
 
-        # --- 1. Input Processing Modules (Imported) ---
-        self.vector_processor = vector_processor
-        self.cnn_processor = cnn_processor
-        # This processes the features extracted from padded tensors
-        self.other_nodes_feature_processor = other_nodes_processor
-
-        # --- Transformer for processing sequence of other nodes ---
-        # Assuming the other_nodes_processor above prepares input for the Transformer
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=EMBEDDING_DIM,  # Input embedding dim from other_nodes_processor
-            nhead=4,  # Should be a divisor of EMBEDDING_DIM
-            dim_feedforward=EMBEDDING_DIM * 2,
-            batch_first=True,  # Crucial: Input shape (Batch, SeqLen, EmbedDim)
-            # dropout=0.1 # Optional dropout
-        )
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=2)
-
-        # --- Aggregation/Output head for Transformer sequence ---
-        self.transformer_output_processor = nn.Sequential(
-            layer_init(
-                nn.Linear(EMBEDDING_DIM, EMBEDDING_DIM // HEADCOUNT)
-            )  # Output partial embedding
+        # --- 1. Input Processing Modules (Defined using nn.ModuleDict) ---
+        # Keys in this dictionary ('vector', 'cnn', 'other_nodes') MUST match
+        # the keys provided in the 'processed_state_batch' dictionary from the Trainer.
+        self.processors = nn.ModuleDict(
+            {
+                "vector": VectorProcessor(output_dim=PARTIAL_EMBEDDING_DIM),
+                "cnn": CNNProcessor(
+                    h=DEPTH_MAP_HEIGHT,
+                    w=DEPTH_MAP_WIDTH,
+                    output_dim=PARTIAL_EMBEDDING_DIM,
+                ),
+                "other_nodes": OtherNodesProcessor(
+                    d_model=TRANSFORMER_D_MODEL,  # Pass relevant args
+                    output_dim=PARTIAL_EMBEDDING_DIM,
+                ),
+                # --- To add a new head (e.g., for audio): ---
+                # 1. Define AudioProcessor in processors.py outputting PARTIAL_EMBEDDING_DIM
+                # 2. Add it here:
+                # 'audio': AudioProcessor(output_dim=PARTIAL_EMBEDDING_DIM),
+                # 3. Ensure Trainer prepares 'audio' data in the state dict.
+            }
         )
 
         # --- 2. Feature Combination ---
-        # Ensure HEADCOUNT divides EMBEDDING_DIM cleanly
-        if EMBEDDING_DIM % HEADCOUNT != 0:
-            raise ValueError(
-                f"EMBEDDING_DIM ({EMBEDDING_DIM}) must be divisible by HEADCOUNT ({HEADCOUNT})"
-            )
-        combined_embedding_dim = (
-            EMBEDDING_DIM // HEADCOUNT
-        ) * 3  # vector, cnn, other_nodes
+        # Calculate the combined dimension based on the number of processors and their output dim
+        num_processors = len(self.processors)
+        combined_embedding_dim = num_processors * PARTIAL_EMBEDDING_DIM
+        print(f"Number of processor heads: {num_processors}")
+        print(f"Combined embedding dimension: {combined_embedding_dim}")
 
+        # Combiner network to merge features from all processor heads
         self.combiner = nn.Sequential(
-            layer_init(nn.Linear(combined_embedding_dim, 256)), nn.ReLU()
+            # Input size is now dynamically calculated
+            layer_init(nn.Linear(combined_embedding_dim, 256)),
+            nn.ReLU(),
+            # Optional: Add more layers or LayerNorm here
         )
 
         # --- 3. Output Heads ---
-        self.critic = layer_init(nn.Linear(256, 1), std=1.0)
-        self.actor_mean = layer_init(nn.Linear(256, action_dim), std=0.01)
-        self.actor_logstd = nn.Parameter(torch.zeros(1, action_dim))
+        self.critic = layer_init(nn.Linear(256, 1), std=1.0)  # Value head
+        self.actor_mean = layer_init(
+            nn.Linear(256, action_dim), std=0.01
+        )  # Policy mean head
+        self.actor_logstd = nn.Parameter(
+            torch.zeros(1, action_dim)
+        )  # Policy log std dev
 
-    def _process_other_nodes(
-        self,
-        other_nodes_features: torch.Tensor,  # Input: [B, max_nodes, feature_dim=7]
-        other_nodes_mask: torch.Tensor,  # Input: [B, max_nodes] (True=padding)
+    def forward_features(
+        self, processed_state_batch: Dict[str, torch.Tensor]
     ) -> torch.Tensor:
         """
-        Processes the padded batch of other node features using Transformer and aggregation.
-
-        Args:
-            other_nodes_features: Padded tensor of features (pos+quat) for other nodes.
-            other_nodes_mask: Boolean mask indicating padded elements (True for padding).
-
-        Returns:
-            torch.Tensor: Processed embedding for other nodes [B, EMBEDDING_DIM // HEADCOUNT].
-        """
-        # 1. Project features to embedding dimension
-        # Input: [B, max_nodes, 7] -> Output: [B, max_nodes, EMBEDDING_DIM]
-        projected_features = self.other_nodes_feature_processor(other_nodes_features)
-
-        # 2. Apply Transformer Encoder
-        # Input: [B, max_nodes, EMBEDDING_DIM], Mask: [B, max_nodes] (True=pad)
-        # Output: [B, max_nodes, EMBEDDING_DIM]
-        transformer_output = self.transformer_encoder(
-            projected_features, src_key_padding_mask=other_nodes_mask
-        )
-
-        # 3. Aggregate Transformer output (masked mean pooling)
-        # Zero out embeddings corresponding to padding
-        transformer_output = transformer_output.masked_fill(
-            other_nodes_mask.unsqueeze(-1), 0.0
-        )
-        # Count non-padded elements per batch item for averaging
-        non_pad_count = (~other_nodes_mask).sum(dim=1, keepdim=True)  # Shape: [B, 1]
-        # Sum features across the sequence dimension
-        summed_features = transformer_output.sum(dim=1)  # Shape: [B, EMBEDDING_DIM]
-        # Calculate mean, avoiding division by zero if all nodes were padded
-        mean_features = torch.where(
-            non_pad_count > 0,
-            summed_features / non_pad_count.clamp(min=1),  # Clamp to avoid NaN
-            torch.zeros_like(summed_features),
-        )  # Shape: [B, EMBEDDING_DIM]
-
-        # 4. Final processing layer for other nodes embedding
-        # Input: [B, EMBEDDING_DIM] -> Output: [B, EMBEDDING_DIM // HEADCOUNT]
-        processed_other_nodes = self.transformer_output_processor(mean_features)
-
-        return processed_other_nodes
-
-    def get_value(self, processed_state_batch: Dict[str, torch.Tensor]) -> torch.Tensor:
-        """
-        Computes the value estimate for a batch of pre-processed states.
+        Processes the input state dictionary through the respective processor modules
+        and combines the resulting features.
 
         Args:
             processed_state_batch (Dict[str, torch.Tensor]): Dictionary containing
-                batched tensors for "position", "rotation_quat", "depth_map",
-                "other_nodes_features", "other_nodes_mask".
+                batched tensors for each input modality. Keys must match the keys
+                in self.processors (e.g., 'vector', 'cnn', 'other_nodes').
+                The value for 'other_nodes' should be a tuple (features, mask).
 
         Returns:
-            torch.Tensor: Value estimates for the batch [B, 1].
+            torch.Tensor: Combined feature embedding after passing through the combiner.
+                          Shape [Batch, 256] (based on combiner output).
         """
-        # Simplified call, just need the forward pass logic up to the critic
-        # Extract features from the pre-processed batch
-        pos_batch = processed_state_batch["position"]
-        rot_quat_batch = processed_state_batch["rotation_quat"]
-        depth_batch = processed_state_batch["depth_map"]
-        other_nodes_padded_batch = processed_state_batch["other_nodes_features"]
-        other_nodes_mask_batch = processed_state_batch["other_nodes_mask"]
+        processed_features_list: List[
+            torch.Tensor
+        ] = []  # List to store outputs from each processor
 
-        # 1. Process inputs through respective modules
-        vector_input = torch.cat([pos_batch, rot_quat_batch], dim=-1)
-        vector_features = self.vector_processor(vector_input)
-        cnn_features = self.cnn_processor(depth_batch)
-        other_nodes_features = self._process_other_nodes(
-            other_nodes_padded_batch, other_nodes_mask_batch
-        )
+        # Iterate through the processors defined in the ModuleDict
+        for key, processor_module in self.processors.items():
+            if key not in processed_state_batch:
+                raise KeyError(
+                    f"Input key '{key}' not found in processed_state_batch. "
+                    f"Available keys: {list(processed_state_batch.keys())}"
+                )
 
-        # 2. Combine features
-        combined_features = torch.cat(
-            [vector_features, cnn_features, other_nodes_features], dim=-1
-        )
-        combined_embedding = self.combiner(combined_features)
+            input_data = processed_state_batch[key]
 
-        # 3. Get value estimate
+            # Handle tuple inputs (like for other_nodes processor)
+            if isinstance(input_data, tuple):
+                partial_embedding = processor_module(
+                    *input_data
+                )  # Unpack tuple as arguments
+            else:
+                partial_embedding = processor_module(input_data)  # Pass single tensor
+
+            processed_features_list.append(partial_embedding)
+
+        # Concatenate features from all processors along the feature dimension
+        # Shape: [Batch, num_processors * PARTIAL_EMBEDDING_DIM]
+        combined_features = torch.cat(processed_features_list, dim=-1)
+
+        # Pass the combined features through the final combiner network
+        # Shape: [Batch, 256]
+        final_embedding = self.combiner(combined_features)
+
+        return final_embedding
+
+    def get_value(self, processed_state_batch: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """Computes the value estimate V(s) for a batch of pre-processed states."""
+        # Process inputs and combine features using the modular forward_features method
+        combined_embedding = self.forward_features(processed_state_batch)
+        # Get value estimate from the critic head
         value = self.critic(combined_embedding)
         return value  # Shape [B, 1]
 
     def get_action_and_value(
         self,
         processed_state_batch: Dict[str, torch.Tensor],
-        action: Optional[torch.Tensor] = None,  # Optional action for RPO update
+        action: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Computes action, log probability, entropy, and value for a batch of
-        pre-processed states.
-
-        Args:
-            processed_state_batch (Dict[str, torch.Tensor]): Dictionary containing
-                batched tensors for "position", "rotation_quat", "depth_map",
-                "other_nodes_features", "other_nodes_mask".
-            action (Optional[torch.Tensor]): If provided, computes properties for
-                this specific action batch (used during RPO update). If None,
-                samples a new action.
-
-        Returns:
-            Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-                - action: The sampled or provided action [B, action_dim].
-                - log_prob: Log probability of the action [B].
-                - entropy: Entropy of the action distribution [B].
-                - value: Value estimate for the state [B].
+        Computes action, log probability, entropy, and value estimate.
         """
-        # Extract features from the pre-processed batch
-        pos_batch = processed_state_batch["position"]
-        rot_quat_batch = processed_state_batch["rotation_quat"]
-        depth_batch = processed_state_batch["depth_map"]
-        other_nodes_padded_batch = processed_state_batch["other_nodes_features"]
-        other_nodes_mask_batch = processed_state_batch["other_nodes_mask"]
-
-        # --- Feature Extraction and Combination ---
-        # 1. Process inputs through respective modules
-        vector_input = torch.cat([pos_batch, rot_quat_batch], dim=-1)
-        vector_features = self.vector_processor(vector_input)
-        cnn_features = self.cnn_processor(depth_batch)
-        other_nodes_features = self._process_other_nodes(
-            other_nodes_padded_batch, other_nodes_mask_batch
-        )
-
-        # 2. Combine features
-        combined_features = torch.cat(
-            [vector_features, cnn_features, other_nodes_features], dim=-1
-        )
-        combined_embedding = self.combiner(combined_features)  # Shape: [B, 256]
+        # Process inputs and combine features
+        combined_embedding = self.forward_features(
+            processed_state_batch
+        )  # Shape: [B, 256]
 
         # --- Actor-Critic Outputs ---
-        # 3. Get raw action distribution mean and value estimate
-        action_mean_raw = self.actor_mean(combined_embedding)
-        value = self.critic(combined_embedding)  # Shape: [B, 1]
+        action_mean_raw = self.actor_mean(combined_embedding)  # Raw mean from network
+        value = self.critic(combined_embedding)  # Value estimate [B, 1]
 
-        # --- Action Distribution and Sampling ---
-        # Assume action uses quaternion, normalize the mean's quaternion part
-        action_mean_pos = action_mean_raw[..., :-QUATERNION_DIM]
-        action_mean_quat_raw = action_mean_raw[..., -QUATERNION_DIM:]
-        action_mean_quat = F.normalize(action_mean_quat_raw, p=2, dim=-1)
-        action_mean = torch.cat([action_mean_pos, action_mean_quat], dim=-1)
+        # --- Action Distribution and Sampling (Gaussian, Z-Rotation Only) ---
+        action_mean = (
+            action_mean_raw  # No normalization needed for Pos + RotAngle output
+        )
 
-        # Expand log std dev
         action_logstd_expanded = self.actor_logstd.expand_as(action_mean)
         action_std = torch.exp(action_logstd_expanded)
-        # Create distribution using normalized mean
-        probs = torch.distributions.Normal(action_mean, action_std)
+        probs = torch.distributions.Normal(
+            action_mean, action_std
+        )  # Gaussian distribution
 
-        # Inject RPO noise if action is provided (during learning update)
-        if action is not None:
-            # Add noise to the *raw* mean before creating distribution for log_prob calculation
-            # This matches the original RPO implementation's intent during updates
-            z = (
+        # --- RPO Noise / Sampling Logic ---
+        if (
+            action is not None
+        ):  # During training update: Use provided action, add noise to mean for logprob
+            noise = (
                 torch.FloatTensor(action_mean_raw.shape)
                 .uniform_(-self.rpo_alpha, self.rpo_alpha)
-                .to(self.device)  # Ensure noise is on correct device
+                .to(action_mean_raw.device)
             )
-            action_mean_noisy_raw = action_mean_raw + z
+            action_mean_noisy_raw = action_mean_raw + noise
             probs_for_logprob = torch.distributions.Normal(
                 action_mean_noisy_raw, action_std
             )
-            # Use the *provided* action (from buffer) for log_prob calculation
             action_to_evaluate = action
-        else:
-            # Sample a new action if none provided
-            action_sampled_raw = probs.sample()
-            # Normalize the quaternion part of the sampled action
-            action_pos = action_sampled_raw[..., :-QUATERNION_DIM]
-            action_quat_raw = action_sampled_raw[..., -QUATERNION_DIM:]
-            action_quat_normalized = F.normalize(action_quat_raw, p=2, dim=-1)
-            action = torch.cat([action_pos, action_quat_normalized], dim=-1)
-            # Use the distribution based on the normalized mean for log_prob when sampling
+        else:  # During rollout: Sample action, use clean distribution for logprob
+            action_sampled = probs.sample()
+            action = action_sampled
             probs_for_logprob = probs
             action_to_evaluate = action
 
         # Calculate log probability and entropy
-        # Log prob calculation uses the distribution WITH noise if action was provided
         log_prob = probs_for_logprob.log_prob(action_to_evaluate).sum(
-            1
-        )  # Sum over action dimensions
-        # Entropy depends only on std dev, so using original `probs` is fine
-        entropy = probs.entropy().sum(1)  # Sum over action dimensions
+            dim=1
+        )  # Sum over action dim
+        entropy = probs.entropy().sum(dim=1)  # Sum over action dim
 
         return action, log_prob, entropy, value.flatten()  # Return flattened value [B]
