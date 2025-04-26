@@ -149,6 +149,9 @@ class App(ShowBase):
         else:
             self.render.set_light(self.ambient)
 
+#adding a function to create data
+
+
 def main():
     App().run()
 

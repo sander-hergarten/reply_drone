@@ -10,10 +10,32 @@
 #   universal: false
 
 -e file:.
+attrs==25.3.0
+    # via twisted
+automat==25.4.16
+    # via twisted
+constantly==23.10.4
+    # via twisted
+hyperlink==21.0.0
+    # via twisted
+idna==3.10
+    # via hyperlink
+incremental==24.7.2
+    # via twisted
+numpy==2.2.5
+    # via engine
 panda3d==1.10.15
     # via engine
     # via panda3d-simplepbr
 panda3d-simplepbr==0.13.1
     # via engine
+setuptools==79.0.1
+    # via incremental
+    # via zope-interface
+twisted==24.11.0
+    # via engine
 typing-extensions==4.13.2
     # via panda3d-simplepbr
+    # via twisted
+zope-interface==7.2
+    # via twisted

@@ -5,6 +5,8 @@ description = "Add your description here"
 dependencies = [
     "panda3d>=1.10.15",
     "panda3d-simplepbr>=0.13.1",
+    "twisted>=24.11.0",
+    "numpy>=2.2.5",
 ]
 readme = "README.md"
 requires-python = ">= 3.8"
