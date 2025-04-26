@@ -1,0 +1,4 @@
+﻿w_presence: 2.0      # multiplier for CNN probability
+w_geom:     1.2      # rectangle-found bonus
+w_bright:   1.0      # brightness term
+w_contr:    1.0      # contrast term
