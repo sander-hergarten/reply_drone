@@ -1,26 +1,15 @@
-[project]
-name = "engine"
-version = "0.1.0"
-description = "Add your description here"
-dependencies = [
-    "panda3d>=1.10.15",
-    "panda3d-simplepbr>=0.13.1",
-    "numpy>=2.2.5",
-    "torchvision>=0.22.0",
-]
-readme = "README.md"
-requires-python = ">= 3.8"
-
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["maturin>=1.8,<2.0"]
+build-backend = "maturin"
 
-[tool.rye]
-managed = true
-dev-dependencies = []
-
-[tool.hatch.metadata]
-allow-direct-references = true
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/engine"]
+[project]
+name = "reply_drone"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+dynamic = ["version"]
+[tool.maturin]
+features = ["pyo3/extension-module"]

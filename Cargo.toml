@@ -1,0 +1,18 @@
+[package]
+name = "reply_drone"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "reply_drone"
+crate-type = ["cdylib"]
+
+[dependencies]
+bevy = "0.15.3" # Updated to match sub-crate versions from error logs
+gltf = "1.4.1"
+pyo3 = "0.24.0"
+rand = "0.9.1"
+smooth-bevy-cameras = "0.13.0"
+image = { version = "0.25.1", default-features = false, features = ["png", "tiff"] } # For saving depth maps
+bytemuck = { version = "1.15", features = ["derive"] } # For casting slice data
