@@ -3597,6 +3597,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bytemuck",
+ "crossbeam-channel",
  "gltf",
  "image",
  "pyo3",

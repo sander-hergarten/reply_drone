@@ -1,9 +1,8 @@
 use bevy::{asset::{Asset, Handle}, color::LinearRgba, image::Image, pbr::Material, reflect::TypePath, render::{alpha::AlphaMode, render_resource::{AsBindGroup, ShaderRef, ShaderType}}};
 
-const PREPASS_SHADER_ASSET_PATH: &str = "shaders/show_prepass.wgsl";
-const MATERIAL_SHADER_ASSET_PATH: &str = "shaders/custom_material.wgsl";
+use crate::constants::{MATERIAL_SHADER_ASSET_PATH, PREPASS_SHADER_ASSET_PATH};
 
-#[derive(Debug, Clone, Default, ShaderType)]
+#[derive(Debug, Clone, Default, ShaderType, Copy)]
 pub struct ShowPrepassSettings {
     pub show_depth: u32,
     pub show_normals: u32,
@@ -13,7 +12,7 @@ pub struct ShowPrepassSettings {
 }
 
 // This shader simply loads the prepass texture and outputs it directly
-#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone, Copy)]
 pub struct PrepassOutputMaterial {
     #[uniform(0)]
     pub settings: ShowPrepassSettings,
@@ -31,7 +30,7 @@ impl Material for PrepassOutputMaterial {
 }
 
 
-// This is the struct that will be passed to your shader
+// will be passed to your shader
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub struct CustomMaterial {
     #[uniform(0)]
@@ -51,10 +50,4 @@ impl Material for CustomMaterial {
     fn alpha_mode(&self) -> AlphaMode {
         self.alpha_mode
     }
-
-    // You can override the default shaders used in the prepass if your material does
-    // anything not supported by the default prepass
-    // fn prepass_fragment_shader() -> ShaderRef {
-    //     "shaders/custom_material.wgsl".into()
-    // }
 }

@@ -1,7 +1,6 @@
 use rand::Rng;
 
-pub type Position = [i32; 3];
-pub type Rotation = [i32; 3];
+use crate::types::*;
 
 /// Generates a random position with bounds.
 pub fn random_position(

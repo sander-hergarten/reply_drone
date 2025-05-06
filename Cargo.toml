@@ -16,3 +16,4 @@ rand = "0.9.1"
 smooth-bevy-cameras = "0.13.0"
 image = { version = "0.25.1", default-features = false, features = ["png", "tiff"] } # For saving depth maps
 bytemuck = { version = "1.15", features = ["derive"] } # For casting slice data
+crossbeam-channel = "0.5.15"

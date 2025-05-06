@@ -2,35 +2,31 @@ mod depthmap;
 mod input;
 mod backend;
 mod reader;
-
 mod helper;
-use helper::Position;
+mod commands;
+mod constants;
+mod screenshot;
+mod components;
+
+mod types;
+use std::sync::{Mutex, OnceLock};
+
+use types::*;
+
+use commands::{EngineCommands, EngineResponses};
+use crossbeam_channel::Sender;
 
 use bevy::prelude::*;
-use pyo3::prelude::*;
+use pyo3::{exceptions::PyRuntimeError, prelude::*};
 
 use smooth_bevy_cameras::{
     controllers::unreal::UnrealCameraPlugin,
     LookTransformPlugin,
 };
 
-pub type Rotation = [i32; 3];
-pub type NodeId = u32;
-pub type Seed = u64;
+static COMMAND_SENDER: OnceLock<Sender<EngineCommands>> = OnceLock::new();
 
-#[pyclass]
-#[derive(Resource)]
-pub struct Engine {
-    pub node_positions: Vec<Position>,
-    pub node_rotations: Vec<Rotation>,
-}
-
-#[derive(Resource)]
-struct SharedData {
-    engine: Engine,
-}
-
-fn run_bevy_app(engine: Engine) {
+fn run_bevy_app() {
     println!("[Rust] Starting Bevy app...");
     App::new()
         .add_plugins(DefaultPlugins)
@@ -46,36 +42,92 @@ fn run_bevy_app(engine: Engine) {
             }
         ))
         .add_systems(Startup, backend::setup)
-        .add_systems(Update, (input::toggle_prepass_view, input::take_depth_screenshot_on_tab))
-        .insert_resource(engine)
+        // .add_systems(Update, (input::toggle_prepass_view, input::take_depth_screenshot_on_tab))
+        .add_systems(Update, backend::command_processing_system)
         .run();
     println!("[Rust] Bevy app finished.");
 }
 
 #[pyfunction]
-fn start(node_amount: usize) -> PyResult<()> {
-    let bounds = reader::read_glb_bounds("centered.glb");
-    let mut node_positions = Vec::with_capacity(node_amount);
-    let mut node_rotations = Vec::with_capacity(node_amount);
-    for _ in 0..node_amount {
-        let position: Position = helper::random_position(bounds);
-        node_positions.push(position);
-        node_rotations.push(helper::generate_camera_rotation(position, (210, 330)));
-    }
-
-    let engine: Engine = Engine { node_positions, node_rotations };
+fn start() -> PyResult<()> {
+    let (cmd_tx, _) = crossbeam_channel::unbounded();
+    COMMAND_SENDER.set(cmd_tx)
+            .map_err(|_| PyRuntimeError::new_err("x is negative"))?;
 
     Python::with_gil(|py| {
         py.allow_threads(|| {
-            run_bevy_app(engine);
+            run_bevy_app();
         });
     });
 
     Ok(())
 }
 
+#[pyfunction]
+fn add_node(position: Position, rotation: Rotation) -> PyResult<u32> {
+    let (response_tx, response_rx) = crossbeam_channel::bounded(1);
+
+    let sender = COMMAND_SENDER.get()
+            .ok_or_else(|| PyRuntimeError::new_err("Engine not initialized"))?;
+
+    sender.send(EngineCommands::AddNode { 
+        position, rotation, response_tx: Some(response_tx)
+    }).map_err(|e| PyRuntimeError::new_err(format!("Failed to send command: {}", e)))?;
+
+    let result = response_rx.recv()
+        .map_err(|e| PyRuntimeError::new_err(format!("Failed to send command: {}", e)))?;
+
+    match result {
+        EngineResponses::AddNodeResponse { id } => Ok(id),
+        _ => Err(PyRuntimeError::new_err("Unexpected response type"))
+    }
+}
+
+#[pyfunction]
+fn add_random_node() -> PyResult<u32> {
+    let mesh_bounds: [(i32, i32); 3] = reader::read_glb_bounds("centered.glb");
+    let position: Position = helper::random_position(mesh_bounds);
+    add_node(position, helper::generate_camera_rotation(position, (210, 330)))
+}
+
+#[pyfunction]
+fn get_engine() -> PyResult<()> {
+
+    Ok(())
+}
+
+#[pyfunction]
+fn get_full_graph_state() -> PyResult<()> {
+    let (response_tx, response_rx) = crossbeam_channel::bounded(1);
+
+    let sender = COMMAND_SENDER.get()
+            .ok_or_else(|| PyRuntimeError::new_err("Engine not initialized"))?;
+
+    sender.send(EngineCommands::GetFullGraphState { 
+        response_tx: Some(response_tx)
+    }).map_err(|e| PyRuntimeError::new_err(format!("Failed to send command: {}", e)))?;
+
+    let result = response_rx.recv()
+        .map_err(|e| PyRuntimeError::new_err(format!("Failed to send command: {}", e)))?;
+
+    match result {
+        EngineResponses::FullGraphStateResponse { full_graph_state } => {
+            println!("Got full_graph_state {}", full_graph_state.len());
+        },
+        _ => {
+            return Err(PyRuntimeError::new_err("Unexpected response type"));
+        }
+    }
+     
+    Ok(())
+}
+
 #[pymodule]
 fn reply_drone(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(start, m)?)?;
+    m.add_function(wrap_pyfunction!(add_node, m)?)?;
+    m.add_function(wrap_pyfunction!(add_random_node, m)?)?;
+    m.add_function(wrap_pyfunction!(get_engine, m)?)?;
+    m.add_function(wrap_pyfunction!(get_full_graph_state, m)?)?;
     Ok(())
 }
