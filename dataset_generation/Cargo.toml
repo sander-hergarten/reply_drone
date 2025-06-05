@@ -1,0 +1,26 @@
+[package]
+name = "dataset_generation"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = []
+headless = []
+
+[dependencies]
+bevy_capture = "0.2.1"
+bevy_rapier3d = "0.29.0"
+iyes_perf_ui = "0.4.0"
+rand = "0.9.1"
+rand_distr = "0.4.3"
+smooth-bevy-cameras = "0.13.0"
+
+[dependencies.bevy]
+version = "0.15"
+features = [
+    "jpeg",
+    "exr"
+]
+
+[profile.dev.package."*"]
+opt-level = 3
