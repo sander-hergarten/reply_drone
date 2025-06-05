@@ -1,0 +1,28 @@
+[agent]
+num_envs = 1
+num_steps = 2048
+num_minibatches = 32
+total_timesteps = 8000000
+learning_rate = 3e-4
+gamma = 0.99
+gae_lambda = 0.95
+update_epochs = 10
+norm_adv = true
+clip_coef = 0.2
+clip_vloss = true
+ent_coef = 0.0
+vf_coef = 0.5
+max_grad_norm = 0.5
+target_kl = null
+rpo_alpha = 0.5
+
+[experiment]
+exp_name = "ppo_continuous_action"
+seed = 1
+torch_deterministic = true
+cuda = true
+track = false
+wandb_project_name = "cleanRL"
+wandb_entity = null
+capture_video = false
+anneal_lr = true
