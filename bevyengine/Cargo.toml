@@ -1,0 +1,18 @@
+[package]
+name = "bevyengine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy_rapier3d = "0.29.0"
+rand = "0.9.1"
+
+[dependencies.bevy]
+version = "0.15.0"
+features = [
+    "jpeg",
+    "exr"
+]
+
+[profile.dev]
+opt-level = 1
