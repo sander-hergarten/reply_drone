@@ -72,7 +72,7 @@ fn find_position_and_rotation(
         rng.rng.random_range(spawn_range.min.z..spawn_range.max.z),
     );
 
-    while intersecting(position, &meshes, &cuboids) {
+    while intersecting(position, meshes, cuboids) {
         position = Vec3::new(
             rng.rng.random_range(spawn_range.min.x..spawn_range.max.x),
             rng.rng.random_range(spawn_range.min.y..spawn_range.max.y),
@@ -124,7 +124,7 @@ pub fn spawn_features(
         let normal = intersection.normal;
 
         let plane_mesh = meshes.add(Mesh::from(Plane3d::new(Vec3::Y, Vec2::new(0.3, 0.3))));
-        let texture_handle = asset_server.load("features/1.png");
+        let texture_handle = asset_server.load("features/1.jpg");
         let plane_material = materials.add(StandardMaterial {
             base_color_texture: Some(texture_handle),
             ..default()

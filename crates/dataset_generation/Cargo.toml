@@ -21,6 +21,3 @@ features = [
     "jpeg",
     "exr"
 ]
-
-[profile.dev.package."*"]
-opt-level = 3
