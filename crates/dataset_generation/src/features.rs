@@ -137,7 +137,6 @@ pub fn spawn_features(
                 translation: hit_point + normal * 0.02,
                 rotation: Quat::from_rotation_arc(Vec3::Y, normal),
                 scale: Vec3::new(1.0, 1.0, 1.0),
-                ..default()
             },
             RenderLayers::layer(0),
         ));
@@ -152,11 +151,14 @@ pub fn spawn_features(
                 translation: hit_point + normal * 0.02,
                 rotation: Quat::from_rotation_arc(Vec3::Y, normal),
                 scale: Vec3::new(1.0, 1.0, 1.0),
-                ..default()
             },
             RenderLayers::layer(1),
         ));
 
         features_spawned.0 += 1;
     }
+}
+
+fn determine_feature_size_from_file(image: Handle<Image>) -> Vec2 {
+    Vec2::new(0.3, 0.3)
 }

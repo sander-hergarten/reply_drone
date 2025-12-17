@@ -8,15 +8,15 @@ default = []
 headless = []
 
 [dependencies]
-bevy_capture = "0.2.1"
-bevy_rapier3d = "0.29.0"
-iyes_perf_ui = "0.4.0"
+bevy_capture = "0.4.1"
+bevy_rapier3d = "0.32.0"
+iyes_perf_ui = "0.5.0"
+smooth-bevy-cameras = { git = "https://github.com/bonsairobo/smooth-bevy-cameras" }
 rand = "0.9.1"
 rand_distr = "0.4.3"
-smooth-bevy-cameras = "0.13.0"
 
 [dependencies.bevy]
-version = "0.15"
+version = "0.17"
 features = [
     "jpeg",
     "exr"
