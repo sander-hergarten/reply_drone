@@ -11,11 +11,10 @@ Uses 'reflect' mode for map_coordinates boundary handling.
 
 import numpy as np
 import imageio.v3 as iio
+import imageio
 from scipy.ndimage import map_coordinates
-import math
 from tqdm import tqdm
 import sys
-import os
 from pathlib import Path  # Using pathlib for cleaner path handling
 import tyro  # Import tyro
 from typing import Literal  # For type hinting choices
@@ -135,6 +134,7 @@ def convert_equi_to_cubemap(
         gamma: Gamma correction value to apply when output_type is 'png'. Default is 2.2.
     """
 
+    imageio.plugins.freeimage.download()
     if not input_path.is_file():
         print(f"Error: Input file not found: {input_path}")
         sys.exit(1)

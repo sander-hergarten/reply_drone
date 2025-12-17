@@ -4,8 +4,8 @@ use bevy_rapier3d::prelude::*;
 use rand::Rng;
 
 pub fn generate_scene(
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    meshes: ResMut<Assets<Mesh>>,
+    materials: ResMut<Assets<StandardMaterial>>,
     mut rng: ResMut<RngResource>,
     spawn_range: Res<SpawnRange>,
     textures: ResMut<Textures>,
@@ -17,14 +17,12 @@ pub fn generate_scene(
     let materials = generate_materials(count, materials, textures, &mut rng, assets);
     let transforms = generate_transforms(count, &mut rng, spawn_range);
 
-    let scene = transforms
+    transforms
         .into_iter()
         .zip(materials)
         .zip(meshes)
         .map(|((transform, material), (mesh, collider))| (mesh, material, transform, collider))
-        .collect();
-
-    scene
+        .collect()
 }
 
 fn generate_meshes_with_colliders(

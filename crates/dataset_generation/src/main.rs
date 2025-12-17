@@ -6,17 +6,14 @@ mod scene_generation;
 
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::{
-    app::{RunMode, ScheduleRunnerPlugin},
     core_pipeline::Skybox,
     prelude::*,
     render::{
-        RenderPlugin,
-        camera::{CameraRenderGraph, RenderTarget, Viewport},
+        camera::{CameraRenderGraph, Viewport},
         render_resource::{TextureViewDescriptor, TextureViewDimension},
         view::RenderLayers,
     },
 };
-use bevy_capture::{CameraTargetHeadless, Capture, CaptureBundle, encoder::frames};
 use bevy_rapier3d::prelude::*;
 use components::*;
 use features::*;
@@ -57,7 +54,7 @@ impl Cubemap {
         }
     }
     fn fill(&mut self, assets: &Res<AssetServer>) {
-        for entry in std::fs::read_dir("assets/hdr").unwrap() {
+        for entry in std::fs::read_dir("assets/hdr").expect("hdrs missing") {
             let path = entry.unwrap().path();
             let name = path.strip_prefix("assets").unwrap();
             self.all_handles.push(assets.load(name));
@@ -100,7 +97,7 @@ impl Textures {
     }
     fn fill(&mut self, assets: &Res<AssetServer>) {
         let mut names = Vec::new();
-        for entry in std::fs::read_dir("assets/textures").unwrap() {
+        for entry in std::fs::read_dir("assets/textures").expect("textures folder missing") {
             let path = entry.unwrap().path();
             let name = path.strip_prefix("assets").unwrap();
             names.push(name.to_str().unwrap().to_string());
@@ -122,7 +119,7 @@ impl FeatureTextures {
         Self(Vec::new())
     }
     fn fill(&mut self, assets: &Res<AssetServer>) {
-        for entry in std::fs::read_dir("assets/features").unwrap() {
+        for entry in std::fs::read_dir("assets/features").expect("features folder missing") {
             self.0
                 .push(assets.load(entry.unwrap().path().strip_prefix("assets").unwrap()));
         }
@@ -144,7 +141,7 @@ fn main() {
         .add_plugins(LookTransformPlugin)
         .add_plugins(UnrealCameraPlugin::default())
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
-        .add_plugins(FrameTimeDiagnosticsPlugin::default())
+        .add_plugins(FrameTimeDiagnosticsPlugin)
         .add_plugins(PerfUiPlugin)
         // .add_plugins(ScheduleRunnerPlugin {
         //     run_mode: RunMode::Loop { wait: None },
