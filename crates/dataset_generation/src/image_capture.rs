@@ -78,7 +78,6 @@ pub fn headless_setup(
 }
 
 pub fn capture_update(
-    mut app_exit: MessageWriter<AppExit>,
     mut capture_main_query: Query<&mut Capture, (With<Camera>, Without<RenderLayers>)>,
     mut capture_mask_query: Query<&mut Capture, (With<Camera>, With<RenderLayers>)>,
     mut frame: Local<u32>,
@@ -98,7 +97,7 @@ pub fn capture_update(
         capture_mask.start(frames::FramesEncoder::new("captures/simple/mask"));
     }
     *frame += 1;
-    if *frame >= 150 {
-        app_exit.write(AppExit::Success);
+    if (*frame).is_multiple_of(50) {
+        println!("{}", *frame);
     }
 }

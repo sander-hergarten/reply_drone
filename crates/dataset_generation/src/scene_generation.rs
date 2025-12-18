@@ -13,8 +13,8 @@ pub fn generate_scene(
     textures: ResMut<Textures>,
     assets: Res<AssetServer>,
 ) -> Vec<(Handle<Mesh>, Handle<StandardMaterial>, Transform, Collider)> {
-    let count: u32 = rng.rng.random_range(1..100);
-    // let count: u32 = 2000;
+    // let count: u32 = rng.rng.random_range(1..10000);
+    let count: u32 = 8000;
     let meshes = generate_meshes_with_colliders(count, meshes, &mut rng);
     let materials = generate_materials(count, materials, textures, &mut rng, assets);
     let transforms = generate_transforms(count, &mut rng, spawn_range);
@@ -50,7 +50,7 @@ fn generate_materials(
     let materials: Vec<Handle<StandardMaterial>> = (0..count)
         .map(|_| {
             let texture_handle =
-                assets.load(AssetPath::from_path(&Path::new(textures.pick_random(rng))));
+                assets.load(AssetPath::from_path(Path::new(textures.pick_random(rng))));
             StandardMaterial {
                 base_color_texture: Some(texture_handle),
                 ..default()

@@ -182,10 +182,11 @@ fn main() {
             rng: SmallRng::from_rng(&mut rand::rng()), // <- simpler RNG init
         })
         .insert_resource(SpawnRange {
-            min: Vec3::new(-10.0, -10.0, -10.0),
-            max: Vec3::new(10.0, 10.0, 10.0),
+            min: Vec3::new(-50.0, -50.0, -50.0),
+            max: Vec3::new(50.0, 50.0, 50.0),
         })
         .insert_resource(Cubemap::new())
+        .add_message::<SpawnFeatures>()
         .add_message::<GenerateSceneMessage>()
         .add_message::<ClearSceneMessage>()
         .add_message::<ChangeEnvironmentMessage>()
@@ -217,6 +218,8 @@ fn main() {
             Update,
             change_environment.after(emit_regenerate_scene_event_on_button_press),
         )
+        .add_systems(Update, sample_random_point_system)
+        // .add_systems(Update, regenerate_on_space_key);
         .add_systems(Update, regenerate_on_frame.after(change_environment))
         .add_systems(Update, rotate_camera);
 
@@ -233,7 +236,6 @@ fn setup_assets(
 ) {
     textures.fill(&asset_server);
     feature_textures.fill(&asset_server);
-    println!("Assets loaded");
 }
 
 fn setup(
@@ -361,7 +363,6 @@ fn generate_scene(
                 )
             });
 
-    println!("textured_objects: {}", textured_objects.len());
     commands.spawn_batch(textured_objects);
     commands.spawn_batch(non_textured_objects);
     features_spawned.0 = 0;
@@ -415,7 +416,6 @@ fn change_environment(
     }
 
     let new_cubemap = cubemap.pick_random(&mut rng);
-    println!("new_cubemap: {:?}", new_cubemap);
 
     let image = images.get_mut(&new_cubemap).unwrap();
 
@@ -435,7 +435,6 @@ fn change_environment(
         environment_map_light.specular_map = new_cubemap.clone();
         // Sample from normal distribution and ensure non-negative value
         let intensity = rng.sample_normal(1000.0, 800.0).max(40.0);
-        println!("intensity: {}", intensity);
         environment_map_light.intensity = intensity;
     }
 }
@@ -452,15 +451,6 @@ fn sync_cameras(
         panic!("to many cameras")
     }
 }
-
-// fn save_image(
-//     mut images: ResMut<Assets<Image>>,
-//     mut cubemap: ResMut<Cubemap>,
-//     mut skyboxes: Query<&mut Skybox>,
-// ) {
-//     image.copy_from_slice(cubemap.image_handle.as_bytes());
-//     images.add(image);
-// }
 
 fn clear_scene(
     mut commands: Commands,
@@ -493,25 +483,26 @@ fn emit_regenerate_scene_event_on_button_press(
     change_environment_event_writer.write(ChangeEnvironmentMessage);
 }
 
-// fn regenerate_on_space_key(
-//     mut regenerate_scene_event_writer: MessageWriter<RegenerateSceneMessage>,
-//     keyboard_input: Res<ButtonInput<KeyCode>>,
-// ) {
-//     if keyboard_input.just_pressed(KeyCode::Space) {
-//         regenerate_scene_event_writer.write(RegenerateSceneMessage);
-//     }
-// }
+fn regenerate_on_space_key(
+    mut regenerate_scene_event_writer: MessageWriter<RegenerateSceneMessage>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+) {
+    if keyboard_input.just_pressed(KeyCode::Space) {
+        regenerate_scene_event_writer.write(RegenerateSceneMessage);
+    }
+}
 
 fn regenerate_on_frame(
     mut regenerate_scene_event_writer: MessageWriter<RegenerateSceneMessage>,
     mut counter: Local<u32>,
 ) {
-    if *counter < 10 {
+    if *counter < 3 {
         *counter += 1;
         return;
     } else {
-        *counter = 0;
+        *counter += 1
     }
+
     regenerate_scene_event_writer.write(RegenerateSceneMessage);
 }
 
@@ -520,12 +511,13 @@ fn rotate_camera(
     spawn_range: Res<SpawnRange>,
     mut camera_transforms: Query<&mut Transform, With<Camera>>,
 ) {
-    let position = Vec3::new(
-        rng.rng.random_range(spawn_range.min.x..spawn_range.max.x),
-        rng.rng.random_range(spawn_range.min.y..spawn_range.max.y),
-        rng.rng.random_range(spawn_range.min.z..spawn_range.max.z),
-    );
+    // let position = Vec3::new(
+    //     rng.rng.random_range(spawn_range.min.x..spawn_range.max.x),
+    //     rng.rng.random_range(spawn_range.min.y..spawn_range.max.y),
+    //     rng.rng.random_range(spawn_range.min.z..spawn_range.max.z),
+    // );
 
+    let position = Vec3::ZERO;
     let random_rotation = Quat::from_euler(
         EulerRot::XYZ,
         rng.rng.random_range(0.0..2.0 * std::f32::consts::PI),
