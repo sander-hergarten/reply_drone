@@ -90,9 +90,6 @@ struct FeaturesSpawned(u16);
 struct Textures(Vec<Handle<Image>>, Vec<String>);
 
 #[derive(Message)]
-struct CameraChangeMessage(Transform);
-
-#[derive(Message)]
 struct RegenerateSceneMessage;
 
 #[derive(Message)]
@@ -189,7 +186,6 @@ fn main() {
             max: Vec3::new(10.0, 10.0, 10.0),
         })
         .insert_resource(Cubemap::new())
-        .add_message::<CameraChangeMessage>()
         .add_message::<GenerateSceneMessage>()
         .add_message::<ClearSceneMessage>()
         .add_message::<ChangeEnvironmentMessage>()
@@ -221,48 +217,13 @@ fn main() {
             Update,
             change_environment.after(emit_regenerate_scene_event_on_button_press),
         )
-        .add_systems(Update, regenerate_on_space_key);
+        .add_systems(Update, regenerate_on_frame.after(change_environment))
+        .add_systems(Update, rotate_camera);
 
     #[cfg(feature = "headless")]
     app.add_systems(Update, capture_update);
 
     app.run();
-}
-
-fn after_render(
-    mut camera_change_event: MessageWriter<CameraChangeMessage>,
-    mut rng: ResMut<RngResource>,
-    spawn_range: Res<SpawnRange>,
-) {
-    let position = Vec3::new(
-        rng.rng.random_range(spawn_range.min.x..spawn_range.max.x),
-        rng.rng.random_range(spawn_range.min.y..spawn_range.max.y),
-        rng.rng.random_range(spawn_range.min.z..spawn_range.max.z),
-    );
-
-    let random_rotation = Quat::from_euler(
-        EulerRot::XYZ,
-        rng.rng.random_range(0.0..2.0 * std::f32::consts::PI),
-        rng.rng.random_range(0.0..2.0 * std::f32::consts::PI),
-        rng.rng.random_range(0.0..2.0 * std::f32::consts::PI),
-    );
-    camera_change_event.write(CameraChangeMessage(Transform {
-        translation: position,
-        rotation: random_rotation,
-        ..default()
-    }));
-}
-
-fn transform_camera(
-    mut cameras: Query<&mut Transform, With<Camera>>,
-    mut camera_change_event: MessageReader<CameraChangeMessage>,
-) {
-    for mut transform in &mut cameras {
-        for event in camera_change_event.read() {
-            transform.translation = event.0.translation;
-            transform.rotation = event.0.rotation;
-        }
-    }
 }
 
 fn setup_assets(
@@ -379,7 +340,7 @@ fn generate_scene(
                 (
                     Mesh3d(mesh.clone()),
                     MeshMaterial3d(material.clone()),
-                    transform.clone(),
+                    transform,
                     collider.clone(),
                     IsCuboid,
                 )
@@ -389,7 +350,7 @@ fn generate_scene(
     let non_textured_objects =
         scene
             .into_iter()
-            .zip(blacks.into_iter())
+            .zip(blacks)
             .map(|((mesh, _, transform, _), black)| {
                 (
                     Mesh3d(mesh),
@@ -532,15 +493,49 @@ fn emit_regenerate_scene_event_on_button_press(
     change_environment_event_writer.write(ChangeEnvironmentMessage);
 }
 
-fn is_headless() -> bool {
-    cfg!(feature = "headless")
+// fn regenerate_on_space_key(
+//     mut regenerate_scene_event_writer: MessageWriter<RegenerateSceneMessage>,
+//     keyboard_input: Res<ButtonInput<KeyCode>>,
+// ) {
+//     if keyboard_input.just_pressed(KeyCode::Space) {
+//         regenerate_scene_event_writer.write(RegenerateSceneMessage);
+//     }
+// }
+
+fn regenerate_on_frame(
+    mut regenerate_scene_event_writer: MessageWriter<RegenerateSceneMessage>,
+    mut counter: Local<u32>,
+) {
+    if *counter < 3 {
+        *counter += 1;
+        return;
+    }
+    regenerate_scene_event_writer.write(RegenerateSceneMessage);
 }
 
-fn regenerate_on_space_key(
-    mut regenerate_scene_event_writer: MessageWriter<RegenerateSceneMessage>,
-    keyboard_input: Res<ButtonInput<KeyCode>>,
+fn rotate_camera(
+    mut rng: ResMut<RngResource>,
+    spawn_range: Res<SpawnRange>,
+    mut camera_transforms: Query<&mut Transform, With<Camera>>,
 ) {
-    if keyboard_input.just_pressed(KeyCode::Space) {
-        regenerate_scene_event_writer.write(RegenerateSceneMessage);
+    let position = Vec3::new(
+        rng.rng.random_range(spawn_range.min.x..spawn_range.max.x),
+        rng.rng.random_range(spawn_range.min.y..spawn_range.max.y),
+        rng.rng.random_range(spawn_range.min.z..spawn_range.max.z),
+    );
+
+    let random_rotation = Quat::from_euler(
+        EulerRot::XYZ,
+        rng.rng.random_range(0.0..2.0 * std::f32::consts::PI),
+        rng.rng.random_range(0.0..2.0 * std::f32::consts::PI),
+        rng.rng.random_range(0.0..2.0 * std::f32::consts::PI),
+    );
+    let trans = Transform {
+        translation: position,
+        rotation: random_rotation,
+        ..default()
+    };
+    for mut transform in camera_transforms.iter_mut() {
+        *transform = trans;
     }
 }
