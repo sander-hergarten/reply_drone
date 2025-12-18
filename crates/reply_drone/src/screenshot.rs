@@ -1,6 +1,17 @@
-use bevy::{asset::Assets, color::Color, core_pipeline::core_3d::Camera3d, ecs::{ entity::Entity, query::{With, Without}, system::{Commands, Query, ResMut, Single}}, log, pbr::MeshMaterial3d, transform::components::Transform, ui::widget::{Text, TextUiWriter}};
+use bevy::{
+    asset::Assets,
+    color::Color,
+    ecs::{
+        entity::Entity,
+        query::With,
+        system::{ResMut, Single},
+    },
+    log,
+    pbr::MeshMaterial3d,
+    ui::widget::{Text, TextUiWriter},
+};
 
-use crate::{components::{ComponentIndex, DepthQuad}, depthmap::PrepassOutputMaterial};
+use crate::depthmap::PrepassOutputMaterial;
 
 pub fn change_view(
     mut materials: ResMut<Assets<PrepassOutputMaterial>>,
@@ -58,54 +69,54 @@ pub fn change_view(
 //         writer,
 //     );
 
-    // for (camera_index, camera_transform) in camera_query.iter_mut() {
-    //     if camera_index.0 == idx {
-            // // Move the camera to the desired position and make it look at the target
-            // camera_transform.translation = SCREENSHOT_CAMERA_POS;
-            // camera_transform.look_at(SCREENSHOT_LOOK_AT, Vec3::Y);
+// for (camera_index, camera_transform) in camera_query.iter_mut() {
+//     if camera_index.0 == idx {
+// // Move the camera to the desired position and make it look at the target
+// camera_transform.translation = SCREENSHOT_CAMERA_POS;
+// camera_transform.look_at(SCREENSHOT_LOOK_AT, Vec3::Y);
 
-            // Now, position the quad relative to the camera's position and orientation
-            // for (quad_index, quad) in quad_query.iter_mut() {
-            //     if (quad_index.0 == idx) {
-                    // Get the camera's local axes
-                    // let camera_forward = camera_transform.forward();
-                    // let camera_right = camera_transform.right();
-                    // let camera_up = camera_transform.up();
-                    // // Calculate the quad's position by adding the (1, 1, 1) offset along the camera's local axes
-                    // quad.translation = camera_transform.translation +
-                    //     camera_forward * 1.0 + // 1 unit forward from the camera
-                    //     camera_right * 1.0 +   // 1 unit to the right of the camera
-                    //     camera_up * 1.0;     // 1 unit up from the camera
-                    
-                    // TODO change direction 
-                    // Make the quad look at the same point the camera is looking at
-                    // This ensures the quad is facing in a similar direction as the camera
-                    // quad.look_at(SCREENSHOT_LOOK_AT, Vec3::Y);
-    //             }
-    //         }
-    //     }
-    // }
-    //
+// Now, position the quad relative to the camera's position and orientation
+// for (quad_index, quad) in quad_query.iter_mut() {
+//     if (quad_index.0 == idx) {
+// Get the camera's local axes
+// let camera_forward = camera_transform.forward();
+// let camera_right = camera_transform.right();
+// let camera_up = camera_transform.up();
+// // Calculate the quad's position by adding the (1, 1, 1) offset along the camera's local axes
+// quad.translation = camera_transform.translation +
+//     camera_forward * 1.0 + // 1 unit forward from the camera
+//     camera_right * 1.0 +   // 1 unit to the right of the camera
+//     camera_up * 1.0;     // 1 unit up from the camera
 
-    // 3. Take the screenshot using the new API and return the screenshot data
-    // commands.spawn(
-    //     Screenshot::primary_window().observe(|output: ScreenshotOutput| {
-    //         match output {
-    //             ScreenshotOutput::Image(image) => {
-    //                 let width = image.size().x as usize;
-    //                 let height = image.size().y as usize;
-    //                 let data = image.data();
-    //
-    //                 Some(Array3::from_shape_vec((height, width, 4), data.clone()).unwrap())
-    //             }
-    //             ScreenshotOutput::Error(err) => {
-    //                 eprintln!("Failed to capture screenshot: {:?}", err);
-    //             }
-    //         }
-    //     }),
-    // );
+// TODO change direction
+// Make the quad look at the same point the camera is looking at
+// This ensures the quad is facing in a similar direction as the camera
+// quad.look_at(SCREENSHOT_LOOK_AT, Vec3::Y);
+//             }
+//         }
+//     }
+// }
+//
 
-    // log::info!("Screenshot requested from camera ID: {}", idx);
-    // Note: Saving happens asynchronously in the background by Bevy's render systems.
-    // There's no immediate confirmation here, but the observer handles it.
+// 3. Take the screenshot using the new API and return the screenshot data
+// commands.spawn(
+//     Screenshot::primary_window().observe(|output: ScreenshotOutput| {
+//         match output {
+//             ScreenshotOutput::Image(image) => {
+//                 let width = image.size().x as usize;
+//                 let height = image.size().y as usize;
+//                 let data = image.data();
+//
+//                 Some(Array3::from_shape_vec((height, width, 4), data.clone()).unwrap())
+//             }
+//             ScreenshotOutput::Error(err) => {
+//                 eprintln!("Failed to capture screenshot: {:?}", err);
+//             }
+//         }
+//     }),
+// );
+
+// log::info!("Screenshot requested from camera ID: {}", idx);
+// Note: Saving happens asynchronously in the background by Bevy's render systems.
+// There's no immediate confirmation here, but the observer handles it.
 // }

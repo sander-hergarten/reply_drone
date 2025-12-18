@@ -1,4 +1,4 @@
-use bevy::{ecs::system::Resource, image::Image, render::view::screenshot::Screenshot};
+use bevy::{image::Image, prelude::Resource};
 
 use std::collections::HashMap;
 

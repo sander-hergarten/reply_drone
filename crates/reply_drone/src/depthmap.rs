@@ -1,4 +1,15 @@
-use bevy::{asset::{Asset, Handle}, color::LinearRgba, image::Image, pbr::Material, reflect::TypePath, render::{alpha::AlphaMode, render_resource::{AsBindGroup, ShaderRef, ShaderType}}};
+use bevy::{
+    asset::{Asset, Handle},
+    color::LinearRgba,
+    image::Image,
+    pbr::Material,
+    reflect::TypePath,
+    render::{
+        alpha::AlphaMode,
+        render_resource::{AsBindGroup, ShaderType},
+    },
+    shader::ShaderRef,
+};
 
 use crate::constants::{MATERIAL_SHADER_ASSET_PATH, PREPASS_SHADER_ASSET_PATH};
 
@@ -28,7 +39,6 @@ impl Material for PrepassOutputMaterial {
         AlphaMode::Blend
     }
 }
-
 
 // will be passed to your shader
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]

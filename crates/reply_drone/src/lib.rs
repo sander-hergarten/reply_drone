@@ -1,15 +1,15 @@
-mod depthmap;
-mod input;
 mod backend;
-mod reader;
-mod helper;
 mod commands;
-mod constants;
-mod screenshot;
 mod components;
+mod constants;
+mod depthmap;
+mod helper;
+mod input;
+mod reader;
+mod screenshot;
 
 mod types;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 use types::*;
 
@@ -19,10 +19,7 @@ use crossbeam_channel::Sender;
 use bevy::prelude::*;
 use pyo3::{exceptions::PyRuntimeError, prelude::*};
 
-use smooth_bevy_cameras::{
-    controllers::unreal::UnrealCameraPlugin,
-    LookTransformPlugin,
-};
+use smooth_bevy_cameras::{controllers::unreal::UnrealCameraPlugin, LookTransformPlugin};
 
 static COMMAND_SENDER: OnceLock<Sender<EngineCommands>> = OnceLock::new();
 
@@ -39,7 +36,7 @@ fn run_bevy_app() {
                 // but the meshes using it should not contribute to the prepass render, so we can disable it.
                 prepass_enabled: false,
                 ..default()
-            }
+            },
         ))
         .add_systems(Startup, backend::setup)
         // .add_systems(Update, (input::toggle_prepass_view, input::take_depth_screenshot_on_tab))
@@ -51,8 +48,9 @@ fn run_bevy_app() {
 #[pyfunction]
 fn start() -> PyResult<()> {
     let (cmd_tx, _) = crossbeam_channel::unbounded();
-    COMMAND_SENDER.set(cmd_tx)
-            .map_err(|_| PyRuntimeError::new_err("x is negative"))?;
+    COMMAND_SENDER
+        .set(cmd_tx)
+        .map_err(|_| PyRuntimeError::new_err("x is negative"))?;
 
     Python::with_gil(|py| {
         py.allow_threads(|| {
@@ -67,19 +65,25 @@ fn start() -> PyResult<()> {
 fn add_node(position: Position, rotation: Rotation) -> PyResult<u32> {
     let (response_tx, response_rx) = crossbeam_channel::bounded(1);
 
-    let sender = COMMAND_SENDER.get()
-            .ok_or_else(|| PyRuntimeError::new_err("Engine not initialized"))?;
+    let sender = COMMAND_SENDER
+        .get()
+        .ok_or_else(|| PyRuntimeError::new_err("Engine not initialized"))?;
 
-    sender.send(EngineCommands::AddNode { 
-        position, rotation, response_tx: Some(response_tx)
-    }).map_err(|e| PyRuntimeError::new_err(format!("Failed to send command: {}", e)))?;
+    sender
+        .send(EngineCommands::AddNode {
+            position,
+            rotation,
+            response_tx: Some(response_tx),
+        })
+        .map_err(|e| PyRuntimeError::new_err(format!("Failed to send command: {}", e)))?;
 
-    let result = response_rx.recv()
+    let result = response_rx
+        .recv()
         .map_err(|e| PyRuntimeError::new_err(format!("Failed to send command: {}", e)))?;
 
     match result {
         EngineResponses::AddNodeResponse { id } => Ok(id),
-        _ => Err(PyRuntimeError::new_err("Unexpected response type"))
+        _ => Err(PyRuntimeError::new_err("Unexpected response type")),
     }
 }
 
@@ -87,12 +91,14 @@ fn add_node(position: Position, rotation: Rotation) -> PyResult<u32> {
 fn add_random_node() -> PyResult<u32> {
     let mesh_bounds: [(i32, i32); 3] = reader::read_glb_bounds("centered.glb");
     let position: Position = helper::random_position(mesh_bounds);
-    add_node(position, helper::generate_camera_rotation(position, (210, 330)))
+    add_node(
+        position,
+        helper::generate_camera_rotation(position, (210, 330)),
+    )
 }
 
 #[pyfunction]
 fn get_engine() -> PyResult<()> {
-
     Ok(())
 }
 
@@ -100,25 +106,29 @@ fn get_engine() -> PyResult<()> {
 fn get_full_graph_state() -> PyResult<()> {
     let (response_tx, response_rx) = crossbeam_channel::bounded(1);
 
-    let sender = COMMAND_SENDER.get()
-            .ok_or_else(|| PyRuntimeError::new_err("Engine not initialized"))?;
+    let sender = COMMAND_SENDER
+        .get()
+        .ok_or_else(|| PyRuntimeError::new_err("Engine not initialized"))?;
 
-    sender.send(EngineCommands::GetFullGraphState { 
-        response_tx: Some(response_tx)
-    }).map_err(|e| PyRuntimeError::new_err(format!("Failed to send command: {}", e)))?;
+    sender
+        .send(EngineCommands::GetFullGraphState {
+            response_tx: Some(response_tx),
+        })
+        .map_err(|e| PyRuntimeError::new_err(format!("Failed to send command: {}", e)))?;
 
-    let result = response_rx.recv()
+    let result = response_rx
+        .recv()
         .map_err(|e| PyRuntimeError::new_err(format!("Failed to send command: {}", e)))?;
 
     match result {
         EngineResponses::FullGraphStateResponse { full_graph_state } => {
             println!("Got full_graph_state {}", full_graph_state.len());
-        },
+        }
         _ => {
             return Err(PyRuntimeError::new_err("Unexpected response type"));
         }
     }
-     
+
     Ok(())
 }
 

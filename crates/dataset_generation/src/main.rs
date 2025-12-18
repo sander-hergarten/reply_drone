@@ -4,26 +4,35 @@ mod features;
 mod image_capture;
 mod scene_generation;
 
+use bevy::asset::AssetPath;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::{
-    core_pipeline::Skybox,
+    app::{RunMode, ScheduleRunnerPlugin},
     prelude::*,
+    render::RenderPlugin,
+    winit::WinitPlugin,
+};
+use bevy::{
+    camera::{Viewport, visibility::RenderLayers},
+    core_pipeline::Skybox,
     render::{
-        camera::{CameraRenderGraph, Viewport},
+        camera::CameraRenderGraph,
         render_resource::{TextureViewDescriptor, TextureViewDimension},
-        view::RenderLayers,
     },
 };
 use bevy_rapier3d::prelude::*;
 use components::*;
 use features::*;
-use image_capture::*;
-use iyes_perf_ui::prelude::*;
+use image_capture::CaptureImageMessage;
 use rand::prelude::*;
 use smooth_bevy_cameras::{
     LookTransformPlugin,
     controllers::unreal::{UnrealCameraBundle, UnrealCameraController, UnrealCameraPlugin},
 };
+use std::fs;
+
+#[cfg(feature = "headless")]
+use crate::image_capture::{capture_update, headless_setup};
 
 #[derive(Resource)]
 struct RngResource {
@@ -57,7 +66,8 @@ impl Cubemap {
         for entry in std::fs::read_dir("assets/hdr").expect("hdrs missing") {
             let path = entry.unwrap().path();
             let name = path.strip_prefix("assets").unwrap();
-            self.all_handles.push(assets.load(name));
+            self.all_handles
+                .push(assets.load(AssetPath::from_path(name)));
         }
     }
     fn pick_random(&mut self, rng: &mut RngResource) -> Handle<Image> {
@@ -79,17 +89,17 @@ struct FeaturesSpawned(u16);
 #[derive(Resource)]
 struct Textures(Vec<Handle<Image>>, Vec<String>);
 
-#[derive(Event)]
-struct CameraChangeEvent(Transform);
+#[derive(Message)]
+struct CameraChangeMessage(Transform);
 
-#[derive(Event)]
-struct RegenerateSceneEvent;
+#[derive(Message)]
+struct RegenerateSceneMessage;
 
-#[derive(Event)]
-struct GenerateSceneEvent;
+#[derive(Message)]
+struct GenerateSceneMessage;
 
-#[derive(Event)]
-struct ChangeEnvironmentEvent;
+#[derive(Message)]
+struct ChangeEnvironmentMessage;
 
 impl Textures {
     fn new() -> Self {
@@ -101,7 +111,7 @@ impl Textures {
             let path = entry.unwrap().path();
             let name = path.strip_prefix("assets").unwrap();
             names.push(name.to_str().unwrap().to_string());
-            self.0.push(assets.load(name));
+            self.0.push(assets.load(AssetPath::from_path(name)));
         }
         self.1 = names;
     }
@@ -120,34 +130,55 @@ impl FeatureTextures {
     }
     fn fill(&mut self, assets: &Res<AssetServer>) {
         for entry in std::fs::read_dir("assets/features").expect("features folder missing") {
-            self.0
-                .push(assets.load(entry.unwrap().path().strip_prefix("assets").unwrap()));
+            self.0.push(assets.load(AssetPath::from_path(
+                entry.unwrap().path().strip_prefix("assets").unwrap(),
+            )));
         }
     }
 }
 
-#[derive(Event)]
-struct ClearSceneEvent;
+#[derive(Message)]
+struct ClearSceneMessage;
 
 fn main() {
-    App::new()
-        .add_plugins(
-            DefaultPlugins, // Make sure pipelines are ready before rendering
-                            // .set(RenderPlugin {
-                            //     synchronous_pipeline_compilation: true,
-                            //     ..default()
-                            // }),
-        )
+    let mut app = App::new();
+
+    #[cfg(not(feature = "headless"))]
+    {
+        app.add_plugins(DefaultPlugins)
+            .add_plugins(LookTransformPlugin)
+            .add_plugins(UnrealCameraPlugin::default())
+            .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
+            .add_plugins(FrameTimeDiagnosticsPlugin::default());
+    }
+
+    #[cfg(feature = "headless")]
+    {
+        fs::create_dir_all("captures/simple").unwrap();
+        app.add_plugins((
+            DefaultPlugins
+                .build()
+                // Disable the WinitPlugin to prevent the creation of a window
+                .disable::<WinitPlugin>()
+                // Make sure pipelines are ready before rendering
+                .set(RenderPlugin {
+                    synchronous_pipeline_compilation: true,
+                    ..default()
+                }),
+            // Add the ScheduleRunnerPlugin to run the app in loop mode
+            ScheduleRunnerPlugin {
+                run_mode: RunMode::Loop { wait: None },
+            },
+            // Add the CapturePlugin
+            bevy_capture::CapturePlugin,
+        ))
         .add_plugins(LookTransformPlugin)
         .add_plugins(UnrealCameraPlugin::default())
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
-        .add_plugins(FrameTimeDiagnosticsPlugin)
-        .add_plugins(PerfUiPlugin)
-        // .add_plugins(ScheduleRunnerPlugin {
-        //     run_mode: RunMode::Loop { wait: None },
-        // })
-        // .add_plugins(bevy_capture::CapturePlugin)
-        .insert_resource(Textures::new())
+        .add_plugins(FrameTimeDiagnosticsPlugin::default());
+    }
+
+    app.insert_resource(Textures::new())
         .insert_resource(FeatureTextures::new())
         .insert_resource(FeaturesSpawned(0))
         .insert_resource(RngResource {
@@ -158,19 +189,22 @@ fn main() {
             max: Vec3::new(10.0, 10.0, 10.0),
         })
         .insert_resource(Cubemap::new())
-        .add_event::<CameraChangeEvent>()
-        .add_event::<GenerateSceneEvent>()
-        .add_event::<ClearSceneEvent>()
-        .add_event::<ChangeEnvironmentEvent>()
-        .add_event::<CaptureImageEvent>()
-        .add_event::<RegenerateSceneEvent>()
-        .add_systems(PreStartup, setup_assets)
-        .add_systems(Startup, setup)
-        .add_systems(Update, sync_cameras)
+        .add_message::<CameraChangeMessage>()
+        .add_message::<GenerateSceneMessage>()
+        .add_message::<ClearSceneMessage>()
+        .add_message::<ChangeEnvironmentMessage>()
+        .add_message::<RegenerateSceneMessage>()
+        .add_message::<CaptureImageMessage>();
+
+    app.add_systems(PreStartup, setup_assets);
+    #[cfg(not(feature = "headless"))]
+    app.add_systems(Startup, setup);
+
+    #[cfg(feature = "headless")]
+    app.add_systems(Startup, headless_setup);
+
+    app.add_systems(Update, sync_cameras)
         .add_systems(Update, environment_loader.after(setup))
-        // .add_systems(Update, transform_camera)
-        // .add_systems(Update, after_render)
-        // .add_systems(Last, clear_objects)
         .add_systems(Update, emit_regenerate_scene_event_on_button_press)
         .add_systems(
             Update,
@@ -187,13 +221,16 @@ fn main() {
             Update,
             change_environment.after(emit_regenerate_scene_event_on_button_press),
         )
-        .add_systems(Update, regenerate_on_space_key)
-        .add_systems(Update, swap_and_capture.run_if(is_headless))
-        .run();
+        .add_systems(Update, regenerate_on_space_key);
+
+    #[cfg(feature = "headless")]
+    app.add_systems(Update, capture_update);
+
+    app.run();
 }
 
 fn after_render(
-    mut camera_change_event: EventWriter<CameraChangeEvent>,
+    mut camera_change_event: MessageWriter<CameraChangeMessage>,
     mut rng: ResMut<RngResource>,
     spawn_range: Res<SpawnRange>,
 ) {
@@ -209,7 +246,7 @@ fn after_render(
         rng.rng.random_range(0.0..2.0 * std::f32::consts::PI),
         rng.rng.random_range(0.0..2.0 * std::f32::consts::PI),
     );
-    camera_change_event.send(CameraChangeEvent(Transform {
+    camera_change_event.write(CameraChangeMessage(Transform {
         translation: position,
         rotation: random_rotation,
         ..default()
@@ -218,7 +255,7 @@ fn after_render(
 
 fn transform_camera(
     mut cameras: Query<&mut Transform, With<Camera>>,
-    mut camera_change_event: EventReader<CameraChangeEvent>,
+    mut camera_change_event: MessageReader<CameraChangeMessage>,
 ) {
     for mut transform in &mut cameras {
         for event in camera_change_event.read() {
@@ -242,19 +279,15 @@ fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     windows: Query<&Window>,
-    mut generate_scene_event_writer: EventWriter<GenerateSceneEvent>,
-    mut skyboxes: Query<&mut Skybox>,
     mut cubemap: ResMut<Cubemap>,
     mut rng: ResMut<RngResource>,
-    mut images: ResMut<Assets<Image>>,
 ) {
     cubemap.fill(&asset_server);
 
     let skybox_handle = cubemap.pick_random(&mut rng);
 
-    #[cfg(not(feature = "headless"))]
     {
-        let window = windows.single();
+        let window = windows.single().unwrap();
         let width = window.resolution.physical_width();
         let height = window.resolution.physical_height();
         let half_width = width / 2;
@@ -285,6 +318,7 @@ fn setup(
                 specular_map: skybox_handle.clone(),
                 intensity: 1000.0,        // lux
                 rotation: Quat::IDENTITY, // spin if you need sunrise
+                affects_lightmapped_mesh_diffuse: true,
             },
         ));
 
@@ -305,75 +339,21 @@ fn setup(
         ));
     }
 
-    // cameras saving
-    #[cfg(feature = "headless")]
-    {
-        let default_target = new_target(&mut images);
-        commands.spawn((
-            Camera {
-                order: 0, // Set the main camera to render first
-                target: RenderTarget::Image(default_target.clone().into()),
-                ..default()
-            },
-            Camera3d::default(),
-            Skybox {
-                image: skybox_handle.clone(),
-                brightness: 1000.0,
-                ..default()
-            },
-            EnvironmentMapLight {
-                diffuse_map: skybox_handle.clone(),
-                specular_map: skybox_handle.clone(),
-                intensity: 1000.0,        // lux
-                rotation: Quat::IDENTITY, // spin if you need sunrise
-            },
-            CaptureBundle::default(),
-        ));
-
-        let selection_target = new_target(&mut images);
-        commands.spawn((
-            Camera3d::default(),
-            Camera {
-                order: 1,
-                target: RenderTarget::Image(selection_target.clone().into()),
-                clear_color: ClearColorConfig::Custom(Color::BLACK),
-                ..default()
-            },
-            CameraRenderGraph::new(bevy::core_pipeline::core_3d::graph::Core3d),
-            RenderLayers::layer(1),
-            CaptureBundle::default(),
-        ));
-
-        commands.insert_resource(CaptureState::new(default_target, selection_target));
-    }
-
     commands.insert_resource(AmbientLight {
         color: Color::srgb_u8(210, 220, 240),
         brightness: 0.0,
+        ..Default::default()
     });
-
-    #[cfg(not(feature = "headless"))]
-    commands.spawn((
-        PerfUiRoot {
-            display_labels: false,
-            layout_horizontal: true,
-            values_col_width: 32.0,
-            ..default()
-        },
-        PerfUiEntryFPSWorst::default(),
-        PerfUiEntryFPS::default(),
-    ));
 }
-
 fn generate_scene(
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut textures: ResMut<Textures>,
+    textures: ResMut<Textures>,
     rng: ResMut<RngResource>,
     meshes: ResMut<Assets<Mesh>>,
     assets: Res<AssetServer>,
     spawn_range: Res<SpawnRange>,
-    mut generate_scene_event: EventReader<GenerateSceneEvent>,
+    mut generate_scene_event: MessageReader<GenerateSceneMessage>,
     mut features_spawned: ResMut<FeaturesSpawned>,
 ) {
     if generate_scene_event.is_empty() {
@@ -429,7 +409,7 @@ fn generate_scene(
 fn environment_loader(
     asset_server: Res<AssetServer>,
     mut images: ResMut<Assets<Image>>,
-    mut cubemap: ResMut<Cubemap>,
+    cubemap: ResMut<Cubemap>,
     mut skyboxes: Query<&mut Skybox>,
     mut environment_map_light: Query<&mut EnvironmentMapLight>,
 ) {
@@ -464,7 +444,7 @@ fn change_environment(
     mut skyboxes: Query<&mut Skybox>,
     mut environment_map_light: Query<&mut EnvironmentMapLight>,
     mut rng: ResMut<RngResource>,
-    mut change_environment_event: EventReader<ChangeEnvironmentEvent>,
+    mut change_environment_event: MessageReader<ChangeEnvironmentMessage>,
     mut images: ResMut<Assets<Image>>,
 ) {
     if change_environment_event.is_empty() {
@@ -504,9 +484,11 @@ fn sync_cameras(
     mut second_camera: Query<&mut Transform, (With<Camera>, With<RenderLayers>)>,
 ) {
     if let (Ok(main_transform), Ok(mut second_transform)) =
-        (main_camera.get_single(), second_camera.get_single_mut())
+        (main_camera.single(), second_camera.single_mut())
     {
         *second_transform = *main_transform;
+    } else {
+        panic!("to many cameras")
     }
 }
 
@@ -522,22 +504,22 @@ fn sync_cameras(
 fn clear_scene(
     mut commands: Commands,
     entities: Query<Entity, With<Mesh3d>>,
-    mut clear_scene_event: EventReader<ClearSceneEvent>,
+    mut clear_scene_event: MessageReader<ClearSceneMessage>,
 ) {
     if !clear_scene_event.is_empty() {
         clear_scene_event.clear();
         for entity in entities.iter() {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
     }
 }
 
 fn emit_regenerate_scene_event_on_button_press(
-    mut clear_scene_event_writer: EventWriter<ClearSceneEvent>,
-    mut generate_scene_event_writer: EventWriter<GenerateSceneEvent>,
-    mut change_environment_event_writer: EventWriter<ChangeEnvironmentEvent>,
-    mut regenerate_scene_event_writer: EventReader<RegenerateSceneEvent>,
-    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut clear_scene_event_writer: MessageWriter<ClearSceneMessage>,
+    mut generate_scene_event_writer: MessageWriter<GenerateSceneMessage>,
+    mut change_environment_event_writer: MessageWriter<ChangeEnvironmentMessage>,
+    mut regenerate_scene_event_writer: MessageReader<RegenerateSceneMessage>,
+    // keyboard_input: Res<ButtonInput<KeyCode>>,
 ) {
     if regenerate_scene_event_writer.is_empty() {
         return;
@@ -545,9 +527,9 @@ fn emit_regenerate_scene_event_on_button_press(
         regenerate_scene_event_writer.clear();
     }
 
-    clear_scene_event_writer.send(ClearSceneEvent);
-    generate_scene_event_writer.send(GenerateSceneEvent);
-    change_environment_event_writer.send(ChangeEnvironmentEvent);
+    clear_scene_event_writer.write(ClearSceneMessage);
+    generate_scene_event_writer.write(GenerateSceneMessage);
+    change_environment_event_writer.write(ChangeEnvironmentMessage);
 }
 
 fn is_headless() -> bool {
@@ -555,10 +537,10 @@ fn is_headless() -> bool {
 }
 
 fn regenerate_on_space_key(
-    mut regenerate_scene_event_writer: EventWriter<RegenerateSceneEvent>,
+    mut regenerate_scene_event_writer: MessageWriter<RegenerateSceneMessage>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
 ) {
     if keyboard_input.just_pressed(KeyCode::Space) {
-        regenerate_scene_event_writer.send(RegenerateSceneEvent);
+        regenerate_scene_event_writer.write(RegenerateSceneMessage);
     }
 }

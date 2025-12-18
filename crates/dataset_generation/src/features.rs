@@ -1,9 +1,8 @@
 use crate::components::*;
-use crate::image_capture::CaptureImageEvent;
 use crate::{FeaturesSpawned, RngResource, SpawnRange};
+use bevy::camera::{primitives::MeshAabb, visibility::RenderLayers};
 use bevy::math::Affine3A;
-use bevy::render::view::RenderLayers;
-use bevy::{prelude::*, render::mesh::MeshAabb};
+use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 use rand::Rng;
 
@@ -102,16 +101,17 @@ pub fn spawn_features(
     cuboids: Query<(&Transform, &Mesh3d), With<IsCuboid>>,
     spawn_range: Res<SpawnRange>,
     rapier_context: ReadRapierContext,
-    mut capture_image_event: EventWriter<CaptureImageEvent>,
 ) {
     if features_spawned.0 > 10 {
-        capture_image_event.send(CaptureImageEvent);
+        // capture_image_event.send(CaptureImageEvent);
         return;
     }
 
     let (ray_origin, ray_direction) =
         find_position_and_rotation(&mut rng, &meshes, &cuboids, &spawn_range);
-    let ctx = rapier_context.single();
+    let ctx = rapier_context
+        .single()
+        .expect("Rapier context failed for some reason");
 
     let max_distance = 100.0;
     let solid = true;
@@ -137,7 +137,6 @@ pub fn spawn_features(
                 translation: hit_point + normal * 0.02,
                 rotation: Quat::from_rotation_arc(Vec3::Y, normal),
                 scale: Vec3::new(1.0, 1.0, 1.0),
-                ..default()
             },
             RenderLayers::layer(0),
         ));
@@ -152,7 +151,6 @@ pub fn spawn_features(
                 translation: hit_point + normal * 0.02,
                 rotation: Quat::from_rotation_arc(Vec3::Y, normal),
                 scale: Vec3::new(1.0, 1.0, 1.0),
-                ..default()
             },
             RenderLayers::layer(1),
         ));
