@@ -1,5 +1,7 @@
+use std::path::Path;
+
 use crate::{RngResource, SpawnRange, Textures};
-use bevy::prelude::*;
+use bevy::{asset::AssetPath, prelude::*};
 use bevy_rapier3d::prelude::*;
 use rand::Rng;
 
@@ -47,7 +49,8 @@ fn generate_materials(
 ) -> Vec<Handle<StandardMaterial>> {
     let materials: Vec<Handle<StandardMaterial>> = (0..count)
         .map(|_| {
-            let texture_handle = assets.load(textures.pick_random(rng));
+            let texture_handle =
+                assets.load(AssetPath::from_path(&Path::new(textures.pick_random(rng))));
             StandardMaterial {
                 base_color_texture: Some(texture_handle),
                 ..default()

@@ -1,14 +1,21 @@
-use std::{collections::HashMap, ops::Index};
+use std::{collections::HashMap};
 
 use crossbeam_channel::Receiver;
 
-use crate::{commands::{self, EngineResponses}, constants::{SCREENSHOT_HEIGHT, SCREENSHOT_WIDTH}, depthmap::{self, PrepassOutputMaterial}, input, screenshot::change_view, types::{FullGraphState, Position, Rotation, SingleNodeState}}; 
-use crate::components::{ComponentIndex, DepthQuad};
-
+use crate::{
+    commands::{self, EngineResponses}, 
+    constants::{SCREENSHOT_HEIGHT, SCREENSHOT_WIDTH}, 
+    depthmap::{self, PrepassOutputMaterial}, 
+    screenshot::change_view, 
+    types::{FullGraphState, Position, Rotation, SingleNodeState}, 
+    components::{ComponentIndex, DepthQuad}};
 use smooth_bevy_cameras::controllers::unreal::{UnrealCameraBundle, UnrealCameraController};
 
 use bevy::{
-    asset::RenderAssetUsages, core_pipeline::prepass::{DepthPrepass, MotionVectorPrepass, NormalPrepass}, image::ImageSampler, math::quat, pbr::NotShadowCaster, prelude::*, render::{camera::{CameraOutputMode, RenderTarget}, render_resource::{TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureViewDescriptor}}
+    camera::RenderTarget,
+    light::NotShadowCaster,
+    asset::RenderAssetUsages, core_pipeline::prepass::{DepthPrepass, MotionVectorPrepass, NormalPrepass},  prelude::*, 
+    render::render_resource::TextureFormat,
 };
 
 // Resource for holding next camera and depth quad index
@@ -133,7 +140,7 @@ pub fn command_processing_system(
                     let mut full_graph_state: FullGraphState = HashMap::new();
 
                     for (index, mut camera, transform) in query.iter_mut() {
-                        camera.target = RenderTarget::Image(render_target_handle.0.clone());
+                        camera.target = RenderTarget::Image(render_target_handle.0.clone().into());
 
                         if let Some(rendered_image) = images.get(&render_target_handle.0) {
                             let position: Position = [

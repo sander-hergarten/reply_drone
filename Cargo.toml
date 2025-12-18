@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "crates/reply_drone",
-    "crates/bevyengine",
     "crates/dataset_generation",
 ]
 resolver = "2"
