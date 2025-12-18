@@ -134,7 +134,6 @@ def convert_equi_to_cubemap(
         gamma: Gamma correction value to apply when output_type is 'png'. Default is 2.2.
     """
 
-    imageio.plugins.freeimage.download()
     if not input_path.is_file():
         print(f"Error: Input file not found: {input_path}")
         sys.exit(1)
@@ -349,13 +348,33 @@ def convert_equi_to_cubemap(
                 np.clip(vertical_cubemap_gamma_corrected, 0.0, 1.0) * 255
             ).astype(np.uint8)
             # Save using the extension, let imageio choose plugin
-            iio.imwrite(output_path, vertical_cubemap_uint8)
+            iio.imwrite(output_path, vertical_cubemap_uint8, plugin="opencv")
             print("PNG file saved.")
         elif output_type == "exr":
             print("Output type is EXR.")
-            # Save float32 data using the extension
-            iio.imwrite(output_path, vertical_cubemap_f32)
-            print("EXR file saved.")
+
+            # 1. Handle Channel Swapping (RGB to BGR)
+            # OpenCV expects BGR, but PyAV/Imageio loads RGB. We must swap them.
+            # checks if we have at least 3 channels
+            if vertical_cubemap_f32.ndim == 3 and vertical_cubemap_f32.shape[2] >= 3:
+                # Swap Red (0) and Blue (2)
+                vertical_cubemap_f32 = vertical_cubemap_f32[..., [2, 1, 0]]
+                print("Swapped RGB to BGR for OpenCV writer.")
+
+            # 2. Drop Alpha Channel (Fixes Bevy Crash)
+            # Bevy and many engines crash if an environment map has an Alpha channel.
+            if vertical_cubemap_f32.shape[2] == 4:
+                vertical_cubemap_f32 = vertical_cubemap_f32[..., :3]
+                print("Dropped Alpha channel to prevent engine crashes.")
+
+            # 3. Ensure Contiguous Memory
+            # OpenCV sometimes fails silently or writes garbage if the array isn't C-contiguous
+            vertical_cubemap_f32 = np.ascontiguousarray(vertical_cubemap_f32)
+
+            # 4. Write
+            # Use plugin="opencv" explicitly
+            iio.imwrite(output_path, vertical_cubemap_f32, plugin="opencv")
+            print("EXR file saved successfully.")
         else:
             # Should be caught by tyro Literal, but defensive check
             raise ValueError(f"Unsupported output_type: {output_type}")
