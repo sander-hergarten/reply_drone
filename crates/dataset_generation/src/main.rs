@@ -506,9 +506,11 @@ fn regenerate_on_frame(
     mut regenerate_scene_event_writer: MessageWriter<RegenerateSceneMessage>,
     mut counter: Local<u32>,
 ) {
-    if *counter < 3 {
+    if *counter < 10 {
         *counter += 1;
         return;
+    } else {
+        *counter = 0;
     }
     regenerate_scene_event_writer.write(RegenerateSceneMessage);
 }
