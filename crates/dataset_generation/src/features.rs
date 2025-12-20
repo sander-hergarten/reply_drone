@@ -1,8 +1,11 @@
+use std::sync::{Arc, Mutex};
+
 use crate::{FeaturesSpawned, RngResource};
 use bevy::camera::visibility::RenderLayers;
 use bevy::mesh::{Indices, VertexAttributeValues};
 use bevy::prelude::*;
 use rand::Rng;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 const FEATURES_TO_SPAWN: u16 = 1000;
 
@@ -111,6 +114,7 @@ pub fn sample_random_point_system(
         .map(|_| rng.rng.random_range(0.0..total_area))
         .collect::<Vec<_>>();
 
+    let rng_mutex = Arc::new(Mutex::new(rng));
     let features_to_spawn = target_area_samples
         .into_iter()
         .filter_map(|target_area_sample: f32| {
@@ -123,12 +127,18 @@ pub fn sample_random_point_system(
 
                 // 4. Sample the specific triangle within this mesh
 
-                sample_point_on_mesh(chosen.mesh, chosen.transform, &mut rng, local_sample_area)
+                sample_point_on_mesh(
+                    chosen.mesh,
+                    chosen.transform,
+                    &mut rng_mutex.lock().unwrap(),
+                    local_sample_area,
+                )
             } else {
                 None
             }
         })
-        .map(|(point, normal)| SpawnFeatures { point, normal });
+        .map(|(point, normal)| SpawnFeatures { point, normal })
+        .collect::<Vec<_>>();
     request_feature_spawns.write_batch(features_to_spawn);
 }
 
