@@ -1,0 +1,16 @@
+[package]
+name = "dataset_processing"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+arrow = "57.1.0"
+bytemuck = "1.24.0"
+futures = "0.3.31"
+hashbrown = "0.16.1"
+image = "0.25.9"
+itertools = "0.14.0"
+parquet = { version = "57.1.0", features = ["async", "arrow", "object_store"] }
+pollster = "0.4.0"
+rayon = "1.11.0"
+wgpu = "27.0.1"
