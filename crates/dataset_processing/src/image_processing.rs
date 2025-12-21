@@ -1,4 +1,4 @@
-use image::{GrayImage, ImageBuffer, RgbImage};
+use image::{GrayImage, ImageBuffer, RgbImage, RgbaImage};
 use std::borrow::Cow;
 use wgpu::util::DeviceExt;
 
@@ -28,6 +28,7 @@ struct GpuResources {
     height: u32,
     padded_bytes_per_row: u32,
     input_texture: wgpu::Texture,
+    image_texture: wgpu::Texture,
     output_texture: wgpu::Texture,
     output_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
@@ -96,6 +97,17 @@ impl WgpuProcessor {
                     },
                     count: None,
                 },
+                // Binding 3: RGB Image Texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -125,11 +137,11 @@ impl WgpuProcessor {
     }
 
     /// Process a batch of images sequentially, reusing GPU resources where possible.
-    pub fn process_batch(&mut self, masks: &[GrayImage], images: &[RgbImage]) -> Vec<GrayImage> {
+    pub fn process_batch(&mut self, masks: &[GrayImage], images: &[RgbImage]) -> Vec<RgbImage> {
         let mut results = Vec::with_capacity(images.len());
 
-        for img in masks {
-            let (width, height) = img.dimensions();
+        for (mask_img, rgb_img) in masks.iter().zip(images.iter()) {
+            let (width, height) = mask_img.dimensions();
 
             // --- 1. Resource Management (Reuse or Recreate) ---
             // If we don't have resources, or the size changed, create new ones.
@@ -146,6 +158,7 @@ impl WgpuProcessor {
             let res = self.resources.as_ref().unwrap();
 
             // --- 2. Upload Data ---
+            // Upload mask texture
             self.queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
                     texture: &res.input_texture,
@@ -153,10 +166,35 @@ impl WgpuProcessor {
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
-                img,
+                mask_img,
                 wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(width),
+                    rows_per_image: None,
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+
+            // Upload RGB image texture (convert to RGBA)
+            let rgba_img = RgbaImage::from_fn(width, height, |x, y| {
+                let rgb = rgb_img.get_pixel(x, y);
+                image::Rgba([rgb[0], rgb[1], rgb[2], 255])
+            });
+            self.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &res.image_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &rgba_img,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(width * 4),
                     rows_per_image: None,
                 },
                 wgpu::Extent3d {
@@ -216,17 +254,19 @@ impl WgpuProcessor {
                 std::thread::sleep(std::time::Duration::from_micros(100));
             }
 
-            // --- 6. Extract Luma Data ---
+            // --- 6. Extract RGB Data ---
             let data = buffer_slice.get_mapped_range();
-            let mut final_bytes = Vec::with_capacity((width * height) as usize);
+            let mut final_bytes = Vec::with_capacity((width * height * 3) as usize);
 
             for row in 0..height {
                 let start = (row * res.padded_bytes_per_row) as usize;
                 // Read row (RGBA pixels)
                 let row_data = &data[start..start + (width * 4) as usize];
-                // Extract every 4th byte (R channel)
+                // Extract RGB channels (skip alpha)
                 for pixel in row_data.chunks(4) {
-                    final_bytes.push(pixel[0]);
+                    final_bytes.push(pixel[0]); // R
+                    final_bytes.push(pixel[1]); // G
+                    final_bytes.push(pixel[2]); // B
                 }
             }
             drop(data);
@@ -255,6 +295,17 @@ impl WgpuProcessor {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        let image_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("RGB Image"),
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
@@ -290,6 +341,12 @@ impl WgpuProcessor {
                     binding: 2,
                     resource: self.param_buffer.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(
+                        &image_texture.create_view(&Default::default()),
+                    ),
+                },
             ],
         });
 
@@ -311,6 +368,7 @@ impl WgpuProcessor {
             height,
             padded_bytes_per_row,
             input_texture,
+            image_texture,
             output_texture,
             output_buffer,
             bind_group,

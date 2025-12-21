@@ -353,13 +353,13 @@ def convert_equi_to_cubemap(
         elif output_type == "exr":
             print("Output type is EXR.")
 
-            # 1. Handle Channel Swapping (RGB to BGR)
-            # OpenCV expects BGR, but PyAV/Imageio loads RGB. We must swap them.
-            # checks if we have at least 3 channels
-            if vertical_cubemap_f32.ndim == 3 and vertical_cubemap_f32.shape[2] >= 3:
-                # Swap Red (0) and Blue (2)
-                vertical_cubemap_f32 = vertical_cubemap_f32[..., [2, 1, 0]]
-                print("Swapped RGB to BGR for OpenCV writer.")
+            # # 1. Handle Channel Swapping (RGB to BGR)
+            # # OpenCV expects BGR, but PyAV/Imageio loads RGB. We must swap them.
+            # # checks if we have at least 3 channels
+            # if vertical_cubemap_f32.ndim == 3 and vertical_cubemap_f32.shape[2] >= 3:
+            #     # Swap Red (0) and Blue (2)
+            #     vertical_cubemap_f32 = vertical_cubemap_f32[..., [2, 1, 0]]
+            #     print("Swapped RGB to BGR for OpenCV writer.")
 
             # 2. Drop Alpha Channel (Fixes Bevy Crash)
             # Bevy and many engines crash if an environment map has an Alpha channel.
@@ -371,6 +371,7 @@ def convert_equi_to_cubemap(
             # OpenCV sometimes fails silently or writes garbage if the array isn't C-contiguous
             vertical_cubemap_f32 = np.ascontiguousarray(vertical_cubemap_f32)
 
+            print(vertical_cubemap_f32)
             # 4. Write
             # Use plugin="opencv" explicitly
             iio.imwrite(output_path, vertical_cubemap_f32, plugin="opencv")

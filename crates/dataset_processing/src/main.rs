@@ -1,20 +1,27 @@
 mod image_processing;
 mod mean;
 
-use std::{cell::RefCell, fs, path::PathBuf, sync::Mutex};
+use std::{
+    cell::RefCell, collections::HashSet, fs, fs::File, io::Cursor, path::PathBuf, sync::Arc,
+};
 
-use hashbrown::HashMap;
+use arrow::array::{BinaryBuilder, RecordBatch};
+use arrow::datatypes::{DataType, Field, Schema};
 use image::{DynamicImage, ImageReader};
 use itertools::Itertools;
+use parquet::arrow::ArrowWriter;
+use parquet::basic::Compression;
+use parquet::file::properties::WriterProperties;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use crate::{image_processing::WgpuProcessor, mean::MeanCalculator};
 
-const IMAGE_SIZE: (usize, usize) = (640, 720);
+const FINAL_IMAGE_SIZE: usize = 512;
 const INTERPOLATION_STEPS: usize = 10;
 const PATH_TO_FRAMES: &str = "/Users/sanderhergarten/Documents/programming/reply_drone/crates/dataset_generation/captures/simple/frames";
 const PATH_TO_MASKS: &str = "/Users/sanderhergarten/Documents/programming/reply_drone/crates/dataset_generation/captures/simple/mask";
 const CHUNK_SIZE: usize = 500;
+const OUTPUT_PARQUET_FILE: &str = "dataset.parquet";
 
 struct Progress {
     paths: Vec<PathBuf>,
@@ -63,9 +70,27 @@ impl Progress {
     }
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mask_paths = balance_dataset();
-    let processor = pollster::block_on(WgpuProcessor::new(0.2));
+    println!("total processing image {:?}", mask_paths.len());
+    let mut processor = pollster::block_on(
+        (0..INTERPOLATION_STEPS)
+            .map(|step| WgpuProcessor::new((step as f32) / ((INTERPOLATION_STEPS - 1) as f32))),
+    );
+
+    // Define schema for Parquet file
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "image",
+        DataType::Binary,
+        false,
+    )]));
+
+    // Initialize Parquet writer
+    let file = File::create(OUTPUT_PARQUET_FILE)?;
+    let props = WriterProperties::builder()
+        .set_compression(Compression::SNAPPY)
+        .build();
+    let mut writer = ArrowWriter::try_new(file, schema.clone(), Some(props))?;
 
     let frame_progress = Progress::from_paths(frame_path_from_mask_path(&mask_paths));
     let mask_progress = Progress::from_paths(mask_paths);
@@ -81,43 +106,41 @@ fn main() {
             .map(|(_, im)| im.to_luma8())
             .collect_vec();
 
-        let results = processor.process_batch(&images);
+        let results = processor.process_batch(&masks, &images);
+
+        // for (i, res) in results.iter().enumerate() {
+        //     res.save(format!("cool/result_{}.png", i)).unwrap();
+        // }
+        // Create BinaryBuilder to collect image binary data (one row per image)
+        let mut image_builder = BinaryBuilder::new();
+        for img in &results {
+            // Encode image to PNG format
+            let mut buffer = Vec::new();
+            let mut cursor = Cursor::new(&mut buffer);
+            img.write_to(&mut cursor, image::ImageFormat::Png)?;
+            // Append each image as a separate row
+            image_builder.append_value(&buffer);
+        }
+
+        // Build the binary array (one row per appended value)
+        let image_array = Arc::new(image_builder.finish());
+
+        // Create RecordBatch with all images (one row per image)
+        let batch = RecordBatch::try_new(schema.clone(), vec![image_array])?;
+
+        // Write the batch to Parquet file
+        writer.write(&batch)?;
+        writer.flush()?;
+
+        // Drop batch and results to free memory
+        drop(batch);
+        drop(results);
     }
 
-    //
-    // let mut processor = pollster::block_on(WgpuProcessor::new(0.2));
-    //
-    // // 3. Process All
+    // Finalize the Parquet file
+    writer.close()?;
 
-    //
-    // // 4. Save
-    // for (i, res) in results.iter().enumerate() {
-    //     res.save(format!("cool/result_{}.png", i)).unwrap();
-    // }
-    //     let schema = Schema::new(vec![
-    //         Field::new("image", DataType::Binary, false),
-    //         Field::new("mask", DataType::Binary, false),
-    //     ]);
-    //     let schema_ref = Arc::new(schema);
-    //
-    //     // 2. Prepare Data Builders
-    //     let mut image_builder = BinaryBuilder::new();
-    //     let mut mask_builder = BinaryBuilder::new();
-    //
-    //     let image_path = "example.jpg"; // specific path to your image
-    //     let mut file = File::open(image_path)?;
-    //     let mut buffer = Vec::new();
-    //     file.read_to_end(&mut buffer)?;
-    //
-    //     // Append data to Arrow arrays
-    //     image_builder.append_value(&buffer);
-    //     label_builder.append_value("cat");
-    //
-    //     let progress = Progress::new(PathBuf::from("/Users/sanderhergarten/Documents/programming/reply_drone/crates/dataset_generation/captures/simple/frames")).expect("directory wasnt able to open");
-    //
-    //     let images = load_batch_into_memory(100, progress);
-    //     let data = RecordBatch::try_from_iter(batch_to_data(images)).unwrap();
-    //     // let writer = ArrowWriter::try_new(, data.schema(), None)
+    Ok(())
 }
 
 fn load_batch_into_memory(progress: &Progress) -> Option<Vec<(PathBuf, DynamicImage)>> {
@@ -129,7 +152,12 @@ fn load_batch_into_memory(progress: &Progress) -> Option<Vec<(PathBuf, DynamicIm
             .map(|path| {
                 (
                     path.clone(),
-                    ImageReader::open(path).unwrap().decode().unwrap(),
+                    ImageReader::open(path).unwrap().decode().unwrap().crop(
+                        0,
+                        0,
+                        FINAL_IMAGE_SIZE as u32,
+                        FINAL_IMAGE_SIZE as u32,
+                    ),
                 )
             })
             .collect(),
@@ -154,6 +182,7 @@ fn balance_dataset() -> Vec<PathBuf> {
     }
 
     let target_samples = means_collector.len().div_ceil(10);
+    println!("target samples{}", target_samples);
     let (_, even_paths): (Vec<f32>, Vec<PathBuf>) =
         distribute_evenly(means_collector, target_samples)
             .into_iter()
@@ -178,34 +207,36 @@ fn distribute_evenly(mut items: Vec<(f32, PathBuf)>, target_count: usize) -> Vec
     }
 
     let mut result = Vec::with_capacity(target_count);
-
-    let mut cursor = 0;
+    let mut used_indices = HashSet::new();
 
     for i in 0..target_count {
         let fraction = i as f32 / (target_count - 1) as f32;
         let target_val = min_val + (range * fraction);
 
-        while cursor < items.len() - 1 && items[cursor].0 < target_val {
-            cursor += 1;
+        // Find the closest unused item
+        let mut best_idx = None;
+        let mut best_dist = f32::MAX;
+
+        for (idx, item) in items.iter().enumerate() {
+            if used_indices.contains(&idx) {
+                continue;
+            }
+
+            let dist = (item.0 - target_val).abs();
+            if dist < best_dist {
+                best_dist = dist;
+                best_idx = Some(idx);
+            }
         }
 
-        let closest_idx = if cursor == 0 {
-            0
+        if let Some(idx) = best_idx {
+            used_indices.insert(idx);
+            result.push(items[idx].clone());
         } else {
-            let curr_dist = (items[cursor].0 - target_val).abs();
-            let prev_dist = (items[cursor - 1].0 - target_val).abs();
-
-            if prev_dist < curr_dist {
-                cursor - 1
-            } else {
-                cursor
-            }
-        };
-
-        result.push(items[closest_idx].clone());
+            // Fallback: if no unused item found, break early
+            break;
+        }
     }
-
-    result.dedup_by(|a, b| a.1 == b.1);
 
     result
 }
