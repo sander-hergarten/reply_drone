@@ -119,9 +119,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|(mut image_builder, mut processor)| {
                 let results = processor.process_batch(&masks, &images);
 
-                // for (i, res) in results.iter().enumerate() {
-                //     res.save(format!("cool/result_{}.png", i)).unwrap();
-                // }
                 // Create BinaryBuilder to collect image binary data (one row per image)
                 for img in &results {
                     // Encode image to PNG format
