@@ -2,6 +2,7 @@
 members = [
     "crates/reply_drone",
     "crates/dataset_generation",
+    "crates/dataset_processing",
 ]
 resolver = "2"
 
