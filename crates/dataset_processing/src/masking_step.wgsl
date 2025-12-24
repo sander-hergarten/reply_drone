@@ -26,8 +26,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let mask_result = mix(val, n, params.alpha);
     
     let rgb = textureLoad(image_texture, vec2<i32>(i32(x), i32(y)), 0).rgb;
-    let result = rgb * mask_result;
+    let result =  mask_result;
 
     // Store as RGBA with RGB multiplied by mask result and alpha = 1.0
-    textureStore(output_texture, vec2<i32>(i32(x), i32(y)), vec4<f32>(result, 1.0));
+    textureStore(output_texture, vec2<i32>(i32(x), i32(y)), vec4<f32>(result, result, result, 1.0));
 }

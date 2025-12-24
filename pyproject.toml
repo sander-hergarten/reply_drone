@@ -13,6 +13,8 @@ dependencies = [
     "pillow>=12.0.0",
     "pyarrow>=22.0.0",
     "scipy>=1.16.3",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
     "tqdm>=4.67.1",
     "tyro>=1.0.2",
 ]
