@@ -1,6 +1,7 @@
 mod image_processing;
 mod mean;
 
+use std::ops::Deref;
 use std::{
     cell::RefCell, collections::HashSet, fs, fs::File, io::Cursor, path::PathBuf, sync::Arc,
 };
@@ -8,7 +9,9 @@ use std::{
 use arrow::array::{Array, BinaryBuilder, RecordBatch};
 use arrow::datatypes::{DataType, Field, Schema};
 use futures::future::join_all;
-use image::{DynamicImage, ImageReader};
+use image::{
+    DynamicImage, EncodableLayout, ImageBuffer, ImageReader, Pixel, PixelWithColorType, RgbImage,
+};
 use itertools::Itertools;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
@@ -81,12 +84,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             WgpuProcessor::new((step as f32) / ((INTERPOLATION_STEPS - 1) as f32))
         })));
 
-    // Define schema for Parquet file
-    let schema = Arc::new(Schema::new(
-        (0..INTERPOLATION_STEPS)
-            .map(|step| Field::new(format!("image_{}", step), DataType::Binary, false))
-            .collect_vec(),
-    ));
+    let schema = Arc::new(Schema::new({
+        let mut columns = vec![Field::new("image", DataType::Binary, false)];
+
+        columns.extend(
+            (0..INTERPOLATION_STEPS)
+                .map(|step| Field::new(format!("mask_{}", step), DataType::Binary, false)),
+        );
+
+        columns
+    }));
 
     // Initialize Parquet writer
     let file = File::create(OUTPUT_PARQUET_FILE)?;
@@ -113,28 +120,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|_| BinaryBuilder::new())
             .collect_vec();
 
-        let (columns, l_processors): (Vec<Arc<dyn Array>>, Vec<WgpuProcessor>) = image_builders
+        let (mut columns, l_processors): (Vec<Arc<dyn Array>>, Vec<WgpuProcessor>) = image_builders
             .into_par_iter()
             .zip(processors)
             .map(|(mut image_builder, mut processor)| {
-                let results = processor.process_batch(&masks, &images);
+                let results = processor.process_batch(&masks);
 
                 // Create BinaryBuilder to collect image binary data (one row per image)
-                for img in &results {
-                    // Encode image to PNG format
-                    let mut buffer = Vec::new();
-                    let mut cursor = Cursor::new(&mut buffer);
-                    img.write_to(&mut cursor, image::ImageFormat::Png).unwrap();
-                    // Append each image as a separate row
-                    image_builder.append_value(&buffer);
-                }
                 (
-                    Arc::new(image_builder.finish()) as Arc<dyn Array>,
+                    images_to_array(results, Some(&mut image_builder)),
                     processor,
                 )
             })
             .unzip();
+
         processors = l_processors;
+
+        columns.insert(0, images_to_array(images, None));
 
         let batch = RecordBatch::try_new(schema.clone(), columns)?;
         // Build the binary array (one row per appended value)
@@ -152,6 +154,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     writer.close()?;
 
     Ok(())
+}
+
+fn images_to_array<P, Container>(
+    images: Vec<ImageBuffer<P, Container>>,
+    builder: Option<&mut BinaryBuilder>,
+) -> Arc<dyn Array>
+where
+    P: Pixel + PixelWithColorType,
+    Container: Deref<Target = [P::Subpixel]>,
+    [P::Subpixel]: EncodableLayout,
+{
+    let image_builder = match builder {
+        Some(b) => b,
+        None => &mut BinaryBuilder::new(),
+    };
+
+    for img in &images {
+        // Encode image to PNG format
+        let mut buffer = Vec::new();
+        let mut cursor = Cursor::new(&mut buffer);
+        img.write_to(&mut cursor, image::ImageFormat::Png).unwrap();
+        // Append each image as a separate row
+        image_builder.append_value(&buffer);
+    }
+    Arc::new(image_builder.finish()) as Arc<dyn Array>
 }
 
 fn load_batch_into_memory(progress: &Progress) -> Option<Vec<(PathBuf, DynamicImage)>> {

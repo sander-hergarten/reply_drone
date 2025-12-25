@@ -137,14 +137,12 @@ impl WgpuProcessor {
     }
 
     /// Process a batch of images sequentially, reusing GPU resources where possible.
-    pub fn process_batch(&mut self, masks: &[GrayImage], images: &[RgbImage]) -> Vec<RgbImage> {
-        let mut results = Vec::with_capacity(images.len());
+    pub fn process_batch(&mut self, masks: &[GrayImage]) -> Vec<GrayImage> {
+        let mut results = Vec::with_capacity(masks.len());
 
-        for (mask_img, rgb_img) in masks.iter().zip(images.iter()) {
+        for mask_img in masks {
             let (width, height) = mask_img.dimensions();
 
-            // --- 1. Resource Management (Reuse or Recreate) ---
-            // If we don't have resources, or the size changed, create new ones.
             let need_new_resources = match &self.resources {
                 Some(res) => res.width != width || res.height != height,
                 None => true,
@@ -154,11 +152,8 @@ impl WgpuProcessor {
                 self.allocate_resources(width, height);
             }
 
-            // We can safely unwrap now because we guaranteed allocation above
             let res = self.resources.as_ref().unwrap();
 
-            // --- 2. Upload Data ---
-            // Upload mask texture
             self.queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
                     texture: &res.input_texture,
@@ -179,32 +174,6 @@ impl WgpuProcessor {
                 },
             );
 
-            // Upload RGB image texture (convert to RGBA)
-            let rgba_img = RgbaImage::from_fn(width, height, |x, y| {
-                let rgb = rgb_img.get_pixel(x, y);
-                image::Rgba([rgb[0], rgb[1], rgb[2], 255])
-            });
-            self.queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &res.image_texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &rgba_img,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(width * 4),
-                    rows_per_image: None,
-                },
-                wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                },
-            );
-
-            // --- 3. Dispatch Compute ---
             let mut encoder = self
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -254,9 +223,8 @@ impl WgpuProcessor {
                 std::thread::sleep(std::time::Duration::from_micros(100));
             }
 
-            // --- 6. Extract RGB Data ---
             let data = buffer_slice.get_mapped_range();
-            let mut final_bytes = Vec::with_capacity((width * height * 3) as usize);
+            let mut final_bytes = Vec::with_capacity((width * height) as usize);
 
             for row in 0..height {
                 let start = (row * res.padded_bytes_per_row) as usize;
