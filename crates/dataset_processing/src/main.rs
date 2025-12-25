@@ -79,27 +79,25 @@ impl Progress {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mask_paths = balance_dataset();
     println!("total processing image {:?}", mask_paths.len());
-    let mut processors =
-        pollster::block_on(join_all((0..INTERPOLATION_STEPS).map(|step| {
-            WgpuProcessor::new((step as f32) / ((INTERPOLATION_STEPS - 1) as f32))
-        })));
 
-    let schema = Arc::new(Schema::new({
-        let mut columns = vec![Field::new("image", DataType::Binary, false)];
-
-        columns.extend(
-            (0..INTERPOLATION_STEPS)
-                .map(|step| Field::new(format!("mask_{}", step), DataType::Binary, false)),
-        );
-
-        columns
-    }));
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("image", DataType::Binary, false),
+        Field::new("clean", DataType::Binary, false),
+        Field::new("noisy", DataType::Binary, false),
+        Field::new("timestep", DataType::UInt16, false),
+    ]));
 
     // Initialize Parquet writer
     let file = File::create(OUTPUT_PARQUET_FILE)?;
     let props = WriterProperties::builder()
         .set_compression(Compression::SNAPPY)
         .build();
+
+    let mut processors =
+        pollster::block_on(join_all((0..INTERPOLATION_STEPS).map(|step| {
+            WgpuProcessor::new((step as f32) / ((INTERPOLATION_STEPS - 1) as f32))
+        })));
+
     let mut writer = ArrowWriter::try_new(file, schema.clone(), Some(props))?;
 
     let frame_progress = Progress::from_paths(frame_path_from_mask_path(&mask_paths));
@@ -120,7 +118,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|_| BinaryBuilder::new())
             .collect_vec();
 
-        let (mut columns, l_processors): (Vec<Arc<dyn Array>>, Vec<WgpuProcessor>) = image_builders
+        let (masks, l_processors): (Vec<Arc<dyn Array>>, Vec<WgpuProcessor>) = image_builders
             .into_par_iter()
             .zip(processors)
             .map(|(mut image_builder, mut processor)| {
@@ -135,19 +133,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unzip();
 
         processors = l_processors;
+        let image_array = images_to_array(images, None);
 
-        columns.insert(0, images_to_array(images, None));
+        masks
+            .into_iter()
+            .tuple_windows()
+            .for_each(|(clean, noisy)| {
+                let batch =
+                    RecordBatch::try_new(schema.clone(), vec![image_array.clone(), clean, noisy])
+                        .unwrap();
 
-        let batch = RecordBatch::try_new(schema.clone(), columns)?;
-        // Build the binary array (one row per appended value)
-
-        // Create RecordBatch with all images (one row per image)
-
-        // Write the batch to Parquet file
-        writer.write(&batch)?;
-        writer.flush()?;
-
-        // Drop batch and results to free memory
+                writer.write(&batch);
+                writer.flush();
+            });
     }
 
     // Finalize the Parquet file

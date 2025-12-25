@@ -11,24 +11,20 @@ struct ShaderParams {
     _padding: [f32; 3],
 }
 
-/// Holds the permanent WGPU connection and pipeline
 pub struct WgpuProcessor {
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::ComputePipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     param_buffer: wgpu::Buffer,
-    // We keep track of reusable resources here
     resources: Option<GpuResources>,
 }
 
-/// Holds the resources that depend on image size (Texture, Buffer, BindGroup)
 struct GpuResources {
     width: u32,
     height: u32,
     padded_bytes_per_row: u32,
     input_texture: wgpu::Texture,
-    image_texture: wgpu::Texture,
     output_texture: wgpu::Texture,
     output_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
@@ -224,7 +220,7 @@ impl WgpuProcessor {
             }
 
             let data = buffer_slice.get_mapped_range();
-            let mut final_bytes = Vec::with_capacity((width * height) as usize);
+            let mut final_bytes = Vec::with_capacity((width * height * 3) as usize);
 
             for row in 0..height {
                 let start = (row * res.padded_bytes_per_row) as usize;
